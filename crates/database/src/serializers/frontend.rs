@@ -17,11 +17,13 @@ use grapher::prelude::{
     RdfsEdge, RdfsNode, RdfsType,
 };
 use log::{debug, error, info, trace, warn};
-use oxrdf::{
-    BlankNode, NamedNode,
-    vocab::{rdf, rdfs},
+use rdf_fusion::{
+    execution::results::QuerySolutionStream,
+    model::{
+        BlankNode, NamedNode, Term,
+        vocab::{rdf, rdfs},
+    },
 };
-use rdf_fusion::{execution::results::QuerySolutionStream, model::Term};
 use vowlr_parser::errors::VOWLRStoreError;
 
 pub struct GraphDisplayDataSolutionSerializer {
@@ -510,10 +512,34 @@ impl GraphDisplayDataSolutionSerializer {
     }
 
     fn check_all_unknowns(&self, data_buffer: &mut SerializationDataBuffer) {
-        info!("Third pass: Resolving all possible unknowns");
+        info!("Second pass: Resolving all possible unknowns");
 
-        let unknowns = take(&mut data_buffer.unknown_buffer);
-        for (_, triples) in unknowns {
+        let unknown_nodes = take(&mut data_buffer.unknown_buffer);
+        for (term, triples) in unknown_nodes {
+            if !data_buffer.label_buffer.contains_key(&term) {
+                self.extract_label(data_buffer, None, &term);
+            }
+
+            if self.is_external(data_buffer, &term) {
+                // dummy triple, only subject matters.
+                let external_triple = Triple::new(
+                    term,
+                    Term::BlankNode(BlankNode::new("_:external_class").unwrap()),
+                    None,
+                );
+                match self.insert_node(
+                    data_buffer,
+                    &external_triple,
+                    ElementType::Owl(OwlType::Node(OwlNode::ExternalClass)),
+                ) {
+                    Ok(_) => (),
+                    Err(e) => {
+                        data_buffer
+                            .failed_buffer
+                            .push((e.inner.triple().cloned(), e.to_string()));
+                    }
+                }
+            }
             for triple in triples {
                 match self.write_node_triple(data_buffer, triple) {
                     Ok(_) => (),
@@ -760,89 +786,54 @@ impl GraphDisplayDataSolutionSerializer {
                     //TODO: OWL1
                     // owl::DISTINCT_MEMBERS => {}
                     owl::EQUIVALENT_CLASS => {
-                        match &triple.target {
-                            Some(target) => {
-                                if target.is_named_node() {
-                                    // Case 1:
-                                    // The subject of an equivalentClass relation should
-                                    // become a full-fledged equivalent class. This happens
-                                    // if the subject and object of the equivalentClass relation
-                                    // are both named classes (i.e. not blank nodes).
-                                    //
-                                    // In other words, the object must be removed from existence,
-                                    // and have all references to it (incl. labels) point to
-                                    // the subject.
-
-                                    // Move object label to subject.
-                                    if let Some(label) = data_buffer.label_buffer.remove(target) {
-                                        debug!("Removed label: {}", label);
-                                        self.extend_element_label(data_buffer, &triple.id, label);
+                        let (index_s, index_o) = self.resolve_so(data_buffer, &triple);
+                        match (index_s, index_o) {
+                            (Some(index_s), Some(index_o)) => {
+                                match self.merge_nodes(data_buffer, &index_o, &index_s) {
+                                    Ok(_) => (),
+                                    Err(e) => {
+                                        data_buffer
+                                            .failed_buffer
+                                            .push((e.inner.triple().cloned(), e.to_string()));
                                     }
+                                }
 
-                                    // Remove object from existence.
-                                    match data_buffer.node_element_buffer.remove(target) {
-                                        // Case 1.1: Object exists in the elememt buffer
-                                        Some(_) => {
-                                            self.merge_nodes(data_buffer, target, &triple.id)?;
-                                        }
-                                        // Case 1.2: Look in the unknown buffer
-                                        None => match data_buffer.unknown_buffer.remove(target) {
-                                            Some(items) => {
-                                                if !items.is_empty() {
-                                                    warn!(
-                                                        "Removed unresolved triples for object '{}' during merge into equivalent subject '{}':\n\t{:#?}",
-                                                        target, triple.id, items
-                                                    );
-                                                }
-                                            }
-                                            None => {
-                                                return Err(ser_err!(SerializationFailed(Some(triple), "Failed to merge object of equivalence relation into subject: object not found".to_string())).into());
-                                            }
-                                        },
-                                    }
+                                // SAFETY: If index_s is Some it exists in node_element_buffer.
+                                if !data_buffer.node_element_buffer[&index_s]
+                                    .eq(&ElementType::Owl(OwlType::Node(OwlNode::AnonymousClass)))
+                                {
                                     self.upgrade_node_type(
                                         data_buffer,
-                                        &triple.id,
+                                        &index_s,
                                         ElementType::Owl(OwlType::Node(OwlNode::EquivalentClass)),
                                     );
-                                } else if target.is_blank_node() {
-                                    // Case 2:
-                                    // The subject of an equivalentClass relation should
-                                    // could either be start of a collection or anon class
-                                    let (index_s, index_o) = self.resolve_so(data_buffer, &triple);
-                                    match (index_s, index_o) {
-                                        (Some(index_s), Some(index_o)) => {
-                                            self.merge_nodes(data_buffer, &index_o, &index_s)?;
-                                        }
-                                        (Some(index_s), None) => {
-                                            if let Some(target) = &triple.target {
-                                                self.redirect_iri(data_buffer, target, &index_s)?;
-                                            } else {
-                                                data_buffer.failed_buffer.push((
-                                                    Some(triple),
-                                                    "Failed to redirect object: not found"
-                                                        .to_string(),
-                                                ));
-                                            }
-                                        }
-                                        _ => {
-                                            self.add_to_unknown_buffer(
-                                                data_buffer,
-                                                target.clone(),
-                                                triple,
-                                            );
-                                        }
+                                    // AnonymousClass does not have label!
+                                    if let Some(label) = data_buffer.label_buffer.get(&index_o) {
+                                        self.extend_element_label(
+                                            data_buffer,
+                                            &index_s,
+                                            label.clone(),
+                                        );
                                     }
-                                } else {
-                                    data_buffer.failed_buffer.push((Some(triple), "Visualization of equivalence relations between classes and literals is not supported".to_string()));
                                 }
                             }
-                            None => {
-                                data_buffer.failed_buffer.push((
-                                    Some(triple),
-                                    "Subject of equivalence relation is missing an object"
-                                        .to_string(),
-                                ));
+                            (Some(_), None) => match triple.target.clone() {
+                                Some(target) => {
+                                    self.add_to_unknown_buffer(data_buffer, target, triple.clone())
+                                }
+                                None => {
+                                    data_buffer.failed_buffer.push((Some(triple), "Failed to merge object of equivalence relation into subject: object not found".to_string()));
+                                }
+                            },
+                            (None, Some(index_o)) => {
+                                self.add_to_unknown_buffer(data_buffer, index_o, triple.clone());
+                            }
+                            (None, None) => {
+                                self.add_to_unknown_buffer(
+                                    data_buffer,
+                                    triple.id.clone(),
+                                    triple.clone(),
+                                );
                             }
                         }
                     }
