@@ -59,7 +59,7 @@
         "-Clinker-plugin-lto",
         "-Clink-arg=-fuse-ld=mold",
         "-Clink-arg=-flto",
-        "-Zpre-link-args=link_libs/mimalloc.o",
+        "-Zpre-link-args=target/link_libs/mimalloc.o",
     ]
 
 
