@@ -36,8 +36,8 @@ pub async fn download_ontology(
     while let Some(chunk) = stream.next().await {
         let bytes = chunk?;
         downloaded += bytes.len();
-        let mb = downloaded as f64 / 1_024.0 / 1_024.0;
-        progress_message.set(format!("Downloaded: {:.2} MB", mb));
+        let mb = downloaded / 1_024 / 1_024;
+        progress_message.set(format!("Downloaded: {mb:.2} MB"));
         data.extend(bytes);
     }
     progress_message.set("Processing...".to_string());
