@@ -266,6 +266,10 @@ impl GraphDisplayDataSolutionSerializer {
             .insert(edge);
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
     pub fn redirect_iri(
         &self,
         data_buffer: &mut SerializationDataBuffer,
@@ -280,6 +284,10 @@ impl GraphDisplayDataSolutionSerializer {
         Ok(())
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
     pub fn check_unknown_buffer(
         &self,
         data_buffer: &mut SerializationDataBuffer,
@@ -294,6 +302,10 @@ impl GraphDisplayDataSolutionSerializer {
         Ok(())
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
     fn insert_node(
         &self,
         data_buffer: &mut SerializationDataBuffer,
@@ -398,6 +410,10 @@ impl GraphDisplayDataSolutionSerializer {
         }
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
     fn merge_nodes(
         &self,
         data_buffer: &mut SerializationDataBuffer,
@@ -483,14 +499,26 @@ impl GraphDisplayDataSolutionSerializer {
         }
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
     fn create_named_node(&self, iri: String) -> Result<NamedNode, SerializationError> {
         Ok(NamedNode::new(&iri).map_err(|e| SerializationErrorKind::IriParseError(iri, e))?)
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
     fn create_blank_node(&self, id: String) -> Result<BlankNode, SerializationError> {
         Ok(BlankNode::new(&id).map_err(|e| SerializationErrorKind::BlankNodeParseError(id, e))?)
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
     fn create_triple(
         &self,
         id: String,
@@ -511,7 +539,10 @@ impl GraphDisplayDataSolutionSerializer {
         debug!("Created new triple: {}", t);
         Ok(t)
     }
-
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
     fn check_all_unknowns(
         &self,
         data_buffer: &mut SerializationDataBuffer,
@@ -545,6 +576,10 @@ impl GraphDisplayDataSolutionSerializer {
         Ok(())
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
     /// Serialize a triple to `data_buffer`.
     fn write_node_triple(
         &self,

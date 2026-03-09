@@ -32,6 +32,7 @@ impl ErrorLogContext {
         self.records.update(|records_| records_.extend(records));
     }
 
+    #[expect(unused)]
     /// Clears the collection, removing all values.
     ///
     /// Note that this method has no effect on the allocated capacity of the vector.
