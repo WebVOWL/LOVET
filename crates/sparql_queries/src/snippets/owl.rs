@@ -22,9 +22,6 @@ impl SparqlSnippet for OwlNode {
             OwlNode::Complement => {
                 r#"{
                 ?id owl:complementOf ?target .
-                FILTER NOT EXISTS { ?target owl:unionOf ?u . }
-                FILTER NOT EXISTS { ?target owl:intersectionOf ?u . }
-                FILTER NOT EXISTS { ?target owl:disjointUnionOf ?u . }
                 BIND(owl:complementOf AS ?nodeType)
                 }"#
             }
@@ -49,14 +46,12 @@ impl SparqlSnippet for OwlNode {
                 r#"{
                 ?id owl:disjointUnionOf/rdf:rest*/rdf:first ?target .
                 BIND(owl:disjointUnionOf AS ?nodeType)
-                FILTER NOT EXISTS { ?c owl:complementOf ?id . }
                 }"#
             }
             OwlNode::IntersectionOf => {
                 r#"{
                 ?id owl:intersectionOf/rdf:rest*/rdf:first ?target .
                 BIND(owl:intersectionOf AS ?nodeType)
-                FILTER NOT EXISTS { ?c owl:complementOf ?id . }
                 }"#
             }
             OwlNode::Thing => {
@@ -69,7 +64,6 @@ impl SparqlSnippet for OwlNode {
                 r#"{
                 ?id owl:unionOf/rdf:rest*/rdf:first ?target .
                 FILTER(?target != rdf:nil)
-                FILTER NOT EXISTS { ?c owl:complementOf ?id . }
                 BIND(owl:unionOf AS ?nodeType)
                 }"#
             }

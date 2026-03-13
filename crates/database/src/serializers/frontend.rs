@@ -623,6 +623,10 @@ impl GraphDisplayDataSolutionSerializer {
     }
 
     /// Serialize a triple to `data_buffer`.
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
     fn write_node_triple(
         &self,
         data_buffer: &mut SerializationDataBuffer,
@@ -812,15 +816,7 @@ impl GraphDisplayDataSolutionSerializer {
                         let edge =
                             self.insert_edge(data_buffer, &triple, ElementType::NoDraw, None);
 
-                        let target_is_structural_class_expression =
-                            if let Some(target) = triple.target.as_ref() {
-                                self.is_structural_class_expression(data_buffer, target)
-                            } else {
-                                false
-                            };
-
-                        if !target_is_structural_class_expression
-                            && triple.target.is_some()
+                        if triple.target.is_some()
                             && let Some(index) = self.resolve(data_buffer, triple.id.clone())
                         {
                             self.upgrade_node_type(
@@ -1159,32 +1155,40 @@ impl GraphDisplayDataSolutionSerializer {
                                         );
 
                                         // If range is a structural class-expression node, collapse to a Thing node.
-                                        let normalized_range = if self
-                                            .is_structural_class_expression(data_buffer, &range)
+                                        let (normalized_domain, normalized_range) = if self
+                                            .is_collapsible_range_expression(data_buffer, &range)
                                         {
-                                            let thing_iri =
-                                                trim_tag_circumfix(domain.to_string().as_str())
-                                                    .to_string()
-                                                    + "_thing";
-                                            let thing_triple = self.create_triple(
-                                                thing_iri,
-                                                owl::THING.into(),
-                                                None,
-                                            )?;
-                                            self.insert_node(
+                                            let thing_anchor = if domain == owl::THING.into() {
+                                                range.clone()
+                                            } else {
+                                                domain.clone()
+                                            };
+
+                                            let thing = self.get_or_create_anchor_thing(
                                                 data_buffer,
-                                                &thing_triple,
-                                                ElementType::Owl(OwlType::Node(OwlNode::Thing)),
+                                                &thing_anchor,
                                             )?;
-                                            thing_triple.id
+                                            self.hide_collapsed_range_expression(
+                                                data_buffer,
+                                                &range,
+                                                &thing,
+                                            )?;
+
+                                            let normalized_domain = if domain == owl::THING.into() {
+                                                thing.clone()
+                                            } else {
+                                                domain.clone()
+                                            };
+
+                                            (normalized_domain, thing)
                                         } else {
-                                            range
+                                            (domain.clone(), range)
                                         };
 
                                         (
                                             None,
                                             Some(Triple {
-                                                id: domain,
+                                                id: normalized_domain,
                                                 element_type: property,
                                                 target: Some(normalized_range),
                                             }),
@@ -1192,127 +1196,135 @@ impl GraphDisplayDataSolutionSerializer {
                                     }
                                     (Some(domain), Some(property), None) => {
                                         trace!("Missing range: {}", triple);
-                                        let node = if target == owl::THING.into() {
-                                            let target_iri =
-                                                trim_tag_circumfix(domain.to_string().as_str())
-                                                    + "_thing";
-                                            info!("Creating thing node: {}", target_iri);
-                                            Some(self.create_triple(
-                                                target_iri.clone(),
-                                                owl::THING.into(),
+
+                                        if target == owl::THING.into() {
+                                            let thing = self
+                                                .get_or_create_domain_thing(data_buffer, &domain)?;
+
+                                            (
                                                 None,
-                                            )?)
+                                                Some(Triple {
+                                                    id: triple.id.clone(),
+                                                    element_type: triple.element_type.clone(),
+                                                    target: Some(thing),
+                                                }),
+                                            )
                                         } else if target == rdfs::LITERAL.into() {
                                             let target_iri =
                                                 trim_tag_circumfix(property.to_string().as_str())
                                                     + "_literal";
                                             info!("Creating literal node: {}", target_iri);
-                                            Some(self.create_triple(
+                                            let node = self.create_triple(
                                                 target_iri.clone(),
                                                 rdfs::LITERAL.into(),
                                                 None,
-                                            )?)
-                                        } else {
-                                            None
-                                        };
-                                        match node {
-                                            Some(node) => (
+                                            )?;
+
+                                            (
                                                 Some(vec![node.clone()]),
                                                 Some(Triple {
                                                     id: triple.id.clone(),
                                                     element_type: triple.element_type.clone(),
                                                     target: Some(node.id),
                                                 }),
-                                            ),
-                                            None => {
-                                                // Register the property itself as an element so it can be resolved by characteristics
-                                                if triple.element_type
-                                                    == owl::OBJECT_PROPERTY.into()
-                                                {
-                                                    self.add_to_element_buffer(
-                                                        &mut data_buffer.edge_element_buffer,
-                                                        &triple,
-                                                        ElementType::Owl(OwlType::Edge(
-                                                            OwlEdge::ObjectProperty,
-                                                        )),
-                                                    );
-                                                    self.check_unknown_buffer(
-                                                        data_buffer,
-                                                        &triple.id,
-                                                    )?;
-                                                    return Ok(SerializationStatus::Serialized);
-                                                } else if triple.element_type
-                                                    == owl::DATATYPE_PROPERTY.into()
-                                                {
-                                                    self.add_to_element_buffer(
-                                                        &mut data_buffer.edge_element_buffer,
-                                                        &triple,
-                                                        ElementType::Owl(OwlType::Edge(
-                                                            OwlEdge::DatatypeProperty,
-                                                        )),
-                                                    );
-                                                    self.check_unknown_buffer(
-                                                        data_buffer,
-                                                        &triple.id,
-                                                    )?;
-                                                    return Ok(SerializationStatus::Serialized);
-                                                }
-
-                                                // Default: defer if it's not a known property type
-                                                self.add_to_unknown_buffer(
-                                                    data_buffer,
-                                                    target,
-                                                    triple.clone(),
+                                            )
+                                        } else {
+                                            // Register the property itself as an element so it can be resolved by characteristics
+                                            if triple.element_type == owl::OBJECT_PROPERTY.into() {
+                                                self.add_to_element_buffer(
+                                                    &mut data_buffer.edge_element_buffer,
+                                                    &triple,
+                                                    ElementType::Owl(OwlType::Edge(
+                                                        OwlEdge::ObjectProperty,
+                                                    )),
                                                 );
-                                                return Ok(SerializationStatus::Deferred);
+                                                self.check_unknown_buffer(data_buffer, &triple.id)?;
+                                                return Ok(SerializationStatus::Serialized);
+                                            } else if triple.element_type
+                                                == owl::DATATYPE_PROPERTY.into()
+                                            {
+                                                self.add_to_element_buffer(
+                                                    &mut data_buffer.edge_element_buffer,
+                                                    &triple,
+                                                    ElementType::Owl(OwlType::Edge(
+                                                        OwlEdge::DatatypeProperty,
+                                                    )),
+                                                );
+                                                self.check_unknown_buffer(data_buffer, &triple.id)?;
+                                                return Ok(SerializationStatus::Serialized);
                                             }
+
+                                            self.add_to_unknown_buffer(
+                                                data_buffer,
+                                                target,
+                                                triple.clone(),
+                                            );
+                                            return Ok(SerializationStatus::Deferred);
                                         }
                                     }
-                                    (None, Some(_), Some(range)) => {
+                                    (None, Some(property), Some(range)) => {
                                         trace!("Missing domain: {}", triple);
-                                        let node = if triple.id == owl::THING.into() {
-                                            let target_iri =
-                                                trim_tag_circumfix(range.to_string().as_str())
-                                                    + "_thing";
-                                            info!("Creating thing node: {}", target_iri);
-                                            Some(self.create_triple(
-                                                target_iri.clone(),
-                                                owl::THING.into(),
+
+                                        if triple.id == owl::THING.into() {
+                                            let thing_anchor = range.clone();
+
+                                            let thing = self.get_or_create_anchor_thing(
+                                                data_buffer,
+                                                &thing_anchor,
+                                            )?;
+
+                                            let normalized_range = if self
+                                                .is_collapsible_range_expression(
+                                                    data_buffer,
+                                                    &range,
+                                                ) {
+                                                self.hide_collapsed_range_expression(
+                                                    data_buffer,
+                                                    &range,
+                                                    &thing,
+                                                )?;
+                                                thing.clone()
+                                            } else {
+                                                range
+                                            };
+
+                                            (
                                                 None,
-                                            )?)
+                                                Some(Triple {
+                                                    id: thing,
+                                                    element_type: property,
+                                                    target: Some(normalized_range),
+                                                }),
+                                            )
                                         } else if triple.id == rdfs::LITERAL.into() {
                                             let target_iri =
                                                 trim_tag_circumfix(range.to_string().as_str())
                                                     + "_literal";
-                                            Some(self.create_triple(
-                                                target_iri.clone(),
+                                            let node = self.create_triple(
+                                                target_iri,
                                                 rdfs::LITERAL.into(),
                                                 None,
-                                            )?)
-                                        } else {
-                                            None
-                                        };
-                                        match node {
-                                            Some(node) => (
+                                            )?;
+
+                                            (
                                                 Some(vec![node.clone()]),
                                                 Some(Triple {
                                                     id: node.id,
-                                                    element_type: triple.element_type.clone(),
+                                                    element_type: property,
                                                     target: triple.target.clone(),
                                                 }),
-                                            ),
-                                            None => {
-                                                trace!(
-                                                    "Adding unknown buffer: target: {}, triple: {}",
-                                                    target, triple
-                                                );
-                                                self.add_to_unknown_buffer(
-                                                    data_buffer,
-                                                    target,
-                                                    triple.clone(),
-                                                );
-                                                return Ok(SerializationStatus::Deferred);
-                                            }
+                                            )
+                                        } else {
+                                            trace!(
+                                                "Adding unknown buffer: target: {}, triple: {}",
+                                                target, triple
+                                            );
+                                            self.add_to_unknown_buffer(
+                                                data_buffer,
+                                                target,
+                                                triple.clone(),
+                                            );
+                                            return Ok(SerializationStatus::Deferred);
                                         }
                                     }
                                     (None, Some(property), None) => {
@@ -1355,7 +1367,7 @@ impl GraphDisplayDataSolutionSerializer {
 
                                             let node = self.create_triple(
                                                 global_thing.to_string(),
-                                                global_thing,
+                                                owl::THING.into(),
                                                 None,
                                             )?;
                                             (
@@ -1494,17 +1506,133 @@ impl GraphDisplayDataSolutionSerializer {
         Ok(SerializationStatus::Serialized)
     }
 
-    fn is_structural_class_expression(
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
+    fn get_or_create_domain_thing(
+        &self,
+        data_buffer: &mut SerializationDataBuffer,
+        domain: &Term,
+    ) -> Result<Term, SerializationError> {
+        if let Some(existing) = data_buffer.anchor_thing_map.get(domain) {
+            return Ok(existing.clone());
+        }
+
+        let thing_iri = trim_tag_circumfix(domain.to_string().as_str()).to_string() + "_thing";
+        let thing_triple = self.create_triple(thing_iri, owl::THING.into(), None)?;
+        let thing_id = thing_triple.id.clone();
+
+        self.insert_node(
+            data_buffer,
+            &thing_triple,
+            ElementType::Owl(OwlType::Node(OwlNode::Thing)),
+        )?;
+
+        data_buffer
+            .anchor_thing_map
+            .insert(domain.clone(), thing_id.clone());
+
+        Ok(thing_id)
+    }
+
+    fn no_draw_target(&self, data_buffer: &SerializationDataBuffer, term: &Term) -> Option<Term> {
+        data_buffer
+            .edge_buffer
+            .iter()
+            .find(|edge| edge.subject == *term && edge.element_type == ElementType::NoDraw)
+            .map(|edge| edge.object.clone())
+    }
+
+    fn is_collapsible_range_expression(
         &self,
         data_buffer: &SerializationDataBuffer,
         term: &Term,
     ) -> bool {
-        matches!(
-            data_buffer.node_element_buffer.get(term),
+        match data_buffer.node_element_buffer.get(term) {
             Some(ElementType::Owl(OwlType::Node(
-                OwlNode::UnionOf | OwlNode::IntersectionOf | OwlNode::DisjointUnion
-            )))
-        )
+                OwlNode::UnionOf | OwlNode::IntersectionOf | OwlNode::DisjointUnion,
+            ))) => true,
+            Some(ElementType::Owl(OwlType::Node(OwlNode::Complement))) => self
+                .no_draw_target(data_buffer, term)
+                .is_some_and(|target| {
+                    matches!(
+                        data_buffer.node_element_buffer.get(&target),
+                        Some(ElementType::Owl(OwlType::Node(
+                            OwlNode::UnionOf | OwlNode::IntersectionOf | OwlNode::DisjointUnion
+                        )))
+                    )
+                }),
+            _ => false,
+        }
+    }
+
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
+    fn hide_collapsed_range_expression(
+        &self,
+        data_buffer: &mut SerializationDataBuffer,
+        range: &Term,
+        replacement: &Term,
+    ) -> Result<(), SerializationError> {
+        let nested_target = match data_buffer.node_element_buffer.get(range) {
+            Some(ElementType::Owl(OwlType::Node(OwlNode::Complement))) => {
+                self.no_draw_target(data_buffer, range)
+            }
+            _ => None,
+        };
+        let nested_target_ref = nested_target.as_ref();
+
+        self.redirect_iri(data_buffer, range, replacement)?;
+        data_buffer.node_element_buffer.remove(range);
+        data_buffer.edges_include_map.remove(range);
+
+        if let Some(target) = nested_target_ref {
+            self.redirect_iri(data_buffer, target, replacement)?;
+            data_buffer.node_element_buffer.remove(target);
+            data_buffer.edges_include_map.remove(target);
+        }
+
+        data_buffer.edge_buffer.retain(|edge| {
+            edge.element_type != ElementType::NoDraw
+                || (edge.subject != *range && edge.object != *range && nested_target_ref.is_none()
+                    || nested_target_ref
+                        .is_none_or(|target| edge.subject != *target && edge.object != *target))
+        });
+
+        Ok(())
+    }
+
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
+    fn get_or_create_anchor_thing(
+        &self,
+        data_buffer: &mut SerializationDataBuffer,
+        anchor: &Term,
+    ) -> Result<Term, SerializationError> {
+        if let Some(existing) = data_buffer.anchor_thing_map.get(anchor) {
+            return Ok(existing.clone());
+        }
+
+        let thing_iri = trim_tag_circumfix(anchor.to_string().as_str()).to_string() + "_thing";
+        let thing_triple = self.create_triple(thing_iri, owl::THING.into(), None)?;
+        let thing_id = thing_triple.id.clone();
+
+        self.insert_node(
+            data_buffer,
+            &thing_triple,
+            ElementType::Owl(OwlType::Node(OwlNode::Thing)),
+        )?;
+
+        data_buffer
+            .anchor_thing_map
+            .insert(anchor.clone(), thing_id.clone());
+
+        Ok(thing_id)
     }
 
     fn insert_characteristic(

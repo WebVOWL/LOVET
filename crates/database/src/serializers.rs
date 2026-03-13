@@ -184,6 +184,11 @@ pub struct SerializationDataBuffer {
     /// Used in cases where multiple elements should refer to a particular instance.
     /// E.g. multiple properties referring to the same instance of owl:Thing.
     global_element_mappings: HashMap<ElementType, usize>,
+    /// Canonical synthesized Thing node per resolved domain.
+    ///
+    /// This lets structurally-defined ranges like complement/union expressions
+    /// collapse to the same Thing node that direct owl:Thing ranges use.
+    anchor_thing_map: HashMap<Term, Term>,
 
     /// Stores the edges of a property.
     ///
@@ -237,6 +242,7 @@ impl SerializationDataBuffer {
             edge_redirection: HashMap::new(),
             edges_include_map: HashMap::new(),
             global_element_mappings: HashMap::new(),
+            anchor_thing_map: HashMap::new(),
             label_buffer: HashMap::new(),
             edge_label_buffer: HashMap::new(),
             edge_buffer: HashSet::new(),
