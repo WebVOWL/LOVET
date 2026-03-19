@@ -43,6 +43,8 @@ pub fn get_reserved_iris() -> HashSet<String> {
         owl::INTERSECTION_OF,
         owl::THING,
         owl::UNION_OF,
+        owl::REAL,
+        owl::RATIONAL,
     ];
 
     let iris = [rdf, rdfs, owl]
