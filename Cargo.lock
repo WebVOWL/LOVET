@@ -2909,7 +2909,7 @@ dependencies = [
 [[package]]
 name = "grapher"
 version = "0.5.3"
-source = "git+https://github.com/WebVOWL/WasmGrapher#ac316ddfc42e5b1a4cb270f25c2decb124d018a1"
+source = "git+https://github.com/WebVOWL/WasmGrapher#0e662b85c0763c27b3094b70e246e7063453b8d3"
 dependencies = [
  "anyhow",
  "bytemuck",

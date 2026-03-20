@@ -853,14 +853,7 @@ impl GraphDisplayDataSolutionSerializer {
             .as_ref()
             .and_then(|edge| data_buffer.edge_characteristics.remove(edge))
         {
-            for characteristic in right_characteristics {
-                if !merged_characteristics
-                    .iter()
-                    .any(|existing| existing == &characteristic)
-                {
-                    merged_characteristics.push(characteristic);
-                }
-            }
+            merged_characteristics.extend(right_characteristics);
         }
 
         let inverse_property = Some(left_property.clone());
@@ -1212,7 +1205,7 @@ impl GraphDisplayDataSolutionSerializer {
                         return Ok(self.insert_characteristic(
                             data_buffer,
                             triple,
-                            Characteristic::AsymmetricProperty.to_string(),
+                            Characteristic::AsymmetricProperty,
                         ));
                     }
 
@@ -1425,7 +1418,7 @@ impl GraphDisplayDataSolutionSerializer {
                         return Ok(self.insert_characteristic(
                             data_buffer,
                             triple,
-                            Characteristic::FunctionalProperty.to_string(),
+                            Characteristic::FunctionalProperty,
                         ));
                     }
 
@@ -1453,7 +1446,7 @@ impl GraphDisplayDataSolutionSerializer {
                         return Ok(self.insert_characteristic(
                             data_buffer,
                             triple,
-                            Characteristic::InverseFunctionalProperty.to_string(),
+                            Characteristic::InverseFunctionalProperty,
                         ));
                     }
 
@@ -1465,7 +1458,7 @@ impl GraphDisplayDataSolutionSerializer {
                         return Ok(self.insert_characteristic(
                             data_buffer,
                             triple,
-                            Characteristic::IrreflexiveProperty.to_string(),
+                            Characteristic::IrreflexiveProperty,
                         ));
                     }
 
@@ -1526,7 +1519,7 @@ impl GraphDisplayDataSolutionSerializer {
                         return Ok(self.insert_characteristic(
                             data_buffer,
                             triple,
-                            Characteristic::ReflexiveProperty.to_string(),
+                            Characteristic::ReflexiveProperty,
                         ));
                     }
 
@@ -1543,7 +1536,7 @@ impl GraphDisplayDataSolutionSerializer {
                         return Ok(self.insert_characteristic(
                             data_buffer,
                             triple,
-                            Characteristic::SymmetricProperty.to_string(),
+                            Characteristic::SymmetricProperty,
                         ));
                     }
                     // owl::TARGET_INDIVIDUAL => {}
@@ -1562,7 +1555,7 @@ impl GraphDisplayDataSolutionSerializer {
                         return Ok(self.insert_characteristic(
                             data_buffer,
                             triple,
-                            Characteristic::TransitiveProperty.to_string(),
+                            Characteristic::TransitiveProperty,
                         ));
                     }
                     owl::UNION_OF => {
@@ -2018,14 +2011,14 @@ impl GraphDisplayDataSolutionSerializer {
         &self,
         data_buffer: &mut SerializationDataBuffer,
         triple: Triple,
-        arg: String,
+        characteristic: Characteristic,
     ) -> SerializationStatus {
         let property_iri = triple.id.clone();
 
         let Some(resolved_iri) = self.resolve(data_buffer, property_iri.clone()) else {
             debug!(
                 "Deferring characteristic '{}' for '{}': property unresolved",
-                arg, property_iri
+                characteristic, property_iri
             );
             self.add_to_unknown_buffer(data_buffer, property_iri, triple);
             return SerializationStatus::Deferred;
@@ -2033,7 +2026,10 @@ impl GraphDisplayDataSolutionSerializer {
 
         // Characteristic can attach only after a concrete edge exists
         if let Some(edge) = data_buffer.property_edge_map.get(&resolved_iri).cloned() {
-            debug!("Inserting edge characteristic: {} -> {}", resolved_iri, arg);
+            debug!(
+                "Inserting edge characteristic: {} -> {}",
+                resolved_iri, characteristic
+            );
 
             let target_edges: Vec<Edge> =
                 if edge.element_type == ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf)) {
@@ -2052,15 +2048,12 @@ impl GraphDisplayDataSolutionSerializer {
                 };
 
             for target_edge in target_edges {
-                let entry = data_buffer
+                data_buffer
                     .edge_characteristics
                     .entry(target_edge)
-                    .or_default();
-                if !entry.iter().any(|existing| existing == &arg) {
-                    entry.push(arg.clone());
-                }
+                    .or_default()
+                    .insert(characteristic);
             }
-
             return SerializationStatus::Serialized;
         }
 
@@ -2068,7 +2061,7 @@ impl GraphDisplayDataSolutionSerializer {
         if data_buffer.edge_element_buffer.contains_key(&resolved_iri) {
             debug!(
                 "Deferring characteristic '{}' for '{}': property known, edge not materialized yet",
-                arg, resolved_iri
+                characteristic, resolved_iri
             );
             self.add_to_unknown_buffer(data_buffer, resolved_iri, triple);
             return SerializationStatus::Deferred;
@@ -2077,7 +2070,7 @@ impl GraphDisplayDataSolutionSerializer {
         // No attach point yet
         debug!(
             "Deferring characteristic '{}' for '{}': no attach point available yet",
-            arg, resolved_iri
+            characteristic, resolved_iri
         );
         self.add_to_unknown_buffer(data_buffer, resolved_iri, triple);
         SerializationStatus::Deferred
