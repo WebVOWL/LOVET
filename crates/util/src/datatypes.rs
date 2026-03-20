@@ -3,15 +3,16 @@ use std::path::Path;
 /// Supported content types.
 #[repr(C)]
 #[derive(
-    rkyv::Archive,
+    rkyv::Archive, 
     rkyv::Deserialize,
-    rkyv::Serialize,
+    rkyv::Serialize, 
     serde::Deserialize,
     serde::Serialize,
     Debug,
     Copy,
     Clone,
     strum::Display,
+    PartialEq,
 )]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum DataType {
