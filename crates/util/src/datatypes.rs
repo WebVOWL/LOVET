@@ -6,7 +6,16 @@ use serde::{Deserialize, Serialize};
 /// Supported content types.
 #[repr(C)]
 #[derive(
-    Archive, RDeserialize, RSerialize, Deserialize, Serialize, Debug, Copy, Clone, strum::Display,
+    Archive,
+    RDeserialize,
+    RSerialize,
+    Deserialize,
+    Serialize,
+    Debug,
+    Copy,
+    Clone,
+    strum::Display,
+    PartialEq,
 )]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum DataType {

@@ -6,8 +6,8 @@ use std::time::Duration;
 use std::{fs::File, time::Instant};
 
 use vowlr_parser::{
-    errors::VOWLRStoreError,
-    parser_util::{parse_stream_to, parser_from_path},
+    errors::{VOWLRStoreError, VOWLRStoreErrorKind},
+    parser_util::{parse_stream_to, parser_from_path, path_type},
 };
 use vowlr_util::prelude::DataType;
 
@@ -28,7 +28,9 @@ impl VOWLRStore {
 
     // TTL format -> (oxittl) RDF XML quads -> (horned_owl) Normalize OWL/RDF -> Quads -> Insert into Oxigraph
     pub async fn insert_file(&self, fs: &Path, lenient: bool) -> Result<(), VOWLRStoreError> {
-        let parser = parser_from_path(fs, lenient)?;
+        let format = path_type(fs)
+            .ok_or_else(|| VOWLRStoreErrorKind::InvalidFileType("Unknown file extension".into()))?;
+        let parser = parser_from_path(fs, format, lenient)?;
         info!("Loading input into database...");
         let start_time = Instant::now();
         self.session
@@ -43,6 +45,50 @@ impl VOWLRStore {
                 .as_secs_f32()
         );
         Ok(())
+    }
+
+    async fn try_load_fallback(
+        &self,
+        path: &Path,
+        lenient: bool,
+        skip_format: Option<DataType>,
+    ) -> Result<(), VOWLRStoreError> {
+        let all_formats = [
+            DataType::OFN,
+            DataType::OWX,
+            DataType::OWL,
+            DataType::RDF,
+            DataType::TTL,
+            DataType::NTriples,
+            DataType::NQuads,
+            DataType::TriG,
+            DataType::JsonLd,
+            DataType::N3,
+        ];
+
+        for format in all_formats {
+            if Some(format) == skip_format {
+                continue;
+            }
+            let path_clone = path.to_path_buf();
+            let parser_res =
+                std::panic::catch_unwind(|| parser_from_path(&path_clone, format, lenient));
+
+            if let Ok(Ok(parser)) = parser_res
+                && self
+                    .session
+                    .load_from_reader(parser.parser, parser.input.as_slice())
+                    .await
+                    .is_ok()
+            {
+                return Ok(());
+            }
+        }
+
+        Err(VOWLRStoreErrorKind::InvalidFileType(
+            "Could not parse file with any format".to_string(),
+        )
+        .into())
     }
 
     pub async fn serialize_to_file(&self, path: &Path) -> Result<(), VOWLRStoreError> {
@@ -91,16 +137,46 @@ impl VOWLRStore {
     }
 
     pub async fn complete_upload(&mut self) -> Result<(), VOWLRStoreError> {
-        if let Some(file) = &mut self.upload_handle {
+        let path = if let Some(file) = &mut self.upload_handle {
             std::io::Write::flush(file)?;
-            let path = file.path();
-            let parser = parser_from_path(path, false)?;
+            Some(file.path().to_owned())
+        } else {
+            None
+        };
 
+        if let Some(path) = path {
             info!("Loading input into database...");
             let start_time = Instant::now();
-            self.session
-                .load_from_reader(parser.parser, parser.input.as_slice())
-                .await?;
+
+            let path_clone = path.clone();
+            let explicit_format = path_type(&path_clone);
+
+            let mut success = false;
+
+            if let Some(format) = explicit_format {
+                let parser_res =
+                    std::panic::catch_unwind(|| parser_from_path(&path_clone, format, false));
+
+                if let Ok(Ok(parser)) = parser_res
+                    && self
+                        .session
+                        .load_from_reader(parser.parser, parser.input.as_slice())
+                        .await
+                        .is_ok()
+                {
+                    success = true;
+                }
+            }
+
+            if !success {
+                match self.try_load_fallback(&path, false, explicit_format).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        return Err(e);
+                    }
+                }
+            }
+
             info!(
                 "Loaded {} quads in {} s",
                 self.session.len().await.unwrap(),

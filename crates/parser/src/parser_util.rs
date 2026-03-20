@@ -167,15 +167,20 @@ pub async fn parse_stream_to(
     }
 }
 
-pub fn parser_from_path(path: &Path, lenient: bool) -> Result<PreparedParser, VOWLRStoreError> {
+pub fn parser_from_path(
+    path: &Path,
+    format: DataType,
+    lenient: bool,
+) -> Result<PreparedParser, VOWLRStoreError> {
     let reader = std::fs::File::open(path)?;
     let reader = BufReader::new(reader);
-    parser_from_reader(reader, path, lenient)
+    parser_from_reader(reader, path, format, lenient)
 }
 
 pub fn parser_from_reader(
     mut reader: impl BufRead,
     path: &Path,
+    format: DataType,
     lenient: bool,
 ) -> Result<PreparedParser, VOWLRStoreError> {
     let make_parser = |fmt| {
@@ -183,14 +188,6 @@ pub fn parser_from_reader(
         let parser = RdfParser::from_format(fmt).with_default_graph(GraphName::DefaultGraph);
         //.with_default_graph(NamedNode::new(format!("file:://{}", path_str)).unwrap());
         if lenient { parser.lenient() } else { parser }
-    };
-
-    let Some(format) = path_type(path) else {
-        return Err(VOWLRStoreErrorKind::InvalidFileType(format!(
-            "Unsupported format {}",
-            path.display()
-        ))
-        .into());
     };
 
     let prepared = match format {
@@ -391,7 +388,8 @@ mod test {
                 warn!("skipping {:?}", resource.as_ref());
                 continue;
             }
-            let parser = parser_from_path(resource.as_ref(), false).unwrap();
+            let dt = path_type(resource.as_ref()).unwrap();
+            let parser = parser_from_path(resource.as_ref(), dt, false).unwrap();
             let _ = session
                 .load_from_reader(parser.parser, parser.input.as_slice())
                 .await;
