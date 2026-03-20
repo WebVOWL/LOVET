@@ -4,7 +4,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use grapher::prelude::{ElementType, GraphDisplayData, OwlEdge, OwlType};
+use grapher::prelude::{Characteristic, ElementType, GraphDisplayData, OwlEdge, OwlType};
 use log::error;
 use oxrdf::Term;
 use vowlr_util::prelude::ErrorRecord;
@@ -217,9 +217,9 @@ pub struct SerializationDataBuffer {
     /// Edges in graph, to avoid duplicates
     edge_buffer: HashSet<Edge>,
     /// Maps from edge to its characteristic.
-    edge_characteristics: HashMap<Edge, Vec<String>>,
+    edge_characteristics: HashMap<Edge, HashSet<Characteristic>>,
     /// Maps from node iri to its characteristics.
-    node_characteristics: HashMap<Term, Vec<String>>,
+    node_characteristics: HashMap<Term, HashSet<Characteristic>>,
     /// Stores unresolved triples.
     ///
     /// - Key = The unresolved IRI of the triple
@@ -335,7 +335,7 @@ impl From<SerializationDataBuffer> for GraphDisplayData {
                     if let Some(characteristics) = characteristics {
                         display_data
                             .characteristics
-                            .insert(edge_idx, characteristics.join("\n"));
+                            .insert(edge_idx, characteristics);
                     }
                 }
                 (None, _) => {
@@ -347,13 +347,11 @@ impl From<SerializationDataBuffer> for GraphDisplayData {
             }
         }
 
-        for (iri, mut characteristics) in val.node_characteristics.into_iter() {
+        for (iri, characteristics) in val.node_characteristics.into_iter() {
             let idx = iricache.get(&iri);
             match idx {
                 Some(idx) => {
-                    display_data
-                        .characteristics
-                        .insert(*idx, characteristics.pop().unwrap());
+                    display_data.characteristics.insert(*idx, characteristics);
                 }
                 None => {
                     error!("Characteristic not found for node in iricache: {}", iri);
