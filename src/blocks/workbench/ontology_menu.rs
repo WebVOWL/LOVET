@@ -111,6 +111,8 @@ pub fn UploadInput() -> impl IntoView {
     Effect::new(move || {
         if let Some(value) = local_loading_done.get() {
             let current_file = file_name.get_untracked();
+            active_graph_name.set(current_file.clone());
+
             match value {
                 Ok(_) => {
                     spawn_local_scoped_with_cancellation(async move {
@@ -127,6 +129,8 @@ pub fn UploadInput() -> impl IntoView {
     Effect::new(move || {
         if let Some(value) = remote_loading_done.get() {
             let current_file = file_name.get_untracked();
+            active_graph_name.set(current_file.clone());
+
             match value {
                 Ok(_) => {
                     spawn_local_scoped_with_cancellation(async move {
