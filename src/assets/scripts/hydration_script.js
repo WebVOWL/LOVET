@@ -3,10 +3,10 @@
         mod.default({
             module_or_path: `${root}/${pkg_path}/${wasm_output_name}.wasm`,
         }).then(() => {
+            mod.hydrate();
             mod.initThreadPool(navigator.hardwareConcurrency).then(() => {
                 console.info("Threadpool initialized");
                 mod.initRender();
-                mod.hydrate();
             })
         })
     })
