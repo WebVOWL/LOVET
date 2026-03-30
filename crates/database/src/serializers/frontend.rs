@@ -1954,6 +1954,7 @@ impl GraphDisplayDataSolutionSerializer {
 
                     // owl::ASSERTION_PROPERTY => {},
                     owl::ASYMMETRIC_PROPERTY => {
+                        self.ensure_implied_object_property(data_buffer, &triple.id)?;
                         return self.insert_characteristic(
                             data_buffer,
                             triple,
@@ -2384,6 +2385,7 @@ impl GraphDisplayDataSolutionSerializer {
                         }
                     }
                     owl::INVERSE_FUNCTIONAL_PROPERTY => {
+                        self.ensure_implied_object_property(data_buffer, &triple.id)?;
                         return self.insert_characteristic(
                             data_buffer,
                             triple,
@@ -2392,10 +2394,15 @@ impl GraphDisplayDataSolutionSerializer {
                     }
 
                     owl::INVERSE_OF => {
+                        self.ensure_implied_object_property(data_buffer, &triple.id)?;
+                        if let Some(target) = triple.target.as_ref() {
+                            self.ensure_implied_object_property(data_buffer, target)?;
+                        }
                         return self.insert_inverse_of(data_buffer, triple);
                     }
 
                     owl::IRREFLEXIVE_PROPERTY => {
+                        self.ensure_implied_object_property(data_buffer, &triple.id)?;
                         return self.insert_characteristic(
                             data_buffer,
                             triple,
@@ -2586,6 +2593,7 @@ impl GraphDisplayDataSolutionSerializer {
                     // owl::PROPERTY_DISJOINT_WITH => {}
                     // owl::QUALIFIED_CARDINALITY => {}
                     owl::REFLEXIVE_PROPERTY => {
+                        self.ensure_implied_object_property(data_buffer, &triple.id)?;
                         return self.insert_characteristic(
                             data_buffer,
                             triple,
@@ -2614,6 +2622,7 @@ impl GraphDisplayDataSolutionSerializer {
                     }
                     // owl::SOURCE_INDIVIDUAL => {}
                     owl::SYMMETRIC_PROPERTY => {
+                        self.ensure_implied_object_property(data_buffer, &triple.id)?;
                         return self.insert_characteristic(
                             data_buffer,
                             triple,
@@ -2633,6 +2642,7 @@ impl GraphDisplayDataSolutionSerializer {
                     // owl::TOP_DATA_PROPERTY => {}
                     // owl::TOP_OBJECT_PROPERTY => {}
                     owl::TRANSITIVE_PROPERTY => {
+                        self.ensure_implied_object_property(data_buffer, &triple.id)?;
                         return self.insert_characteristic(
                             data_buffer,
                             triple,
@@ -3269,6 +3279,44 @@ impl GraphDisplayDataSolutionSerializer {
         Ok(thing_triple.subject_term_id)
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "fixed when serializer is refactored to use pointers instead of values"
+    )]
+    fn ensure_implied_object_property(
+        &self,
+        data_buffer: &mut SerializationDataBuffer,
+        anchor: &Term,
+    ) -> Result<Term, SerializationError> {
+        if let Some(existing) = data_buffer.anchor_thing_map.get(anchor) {
+            return Ok(existing.clone());
+        }
+
+        let thing_iri = synthetic_iri(anchor, SYNTH_THING);
+        let thing_triple = self.create_triple(thing_iri, owl::THING.into(), None)?;
+        let thing_id = thing_triple.id.clone();
+
+        self.insert_node_without_retry(
+            data_buffer,
+            &thing_triple,
+            ElementType::Owl(OwlType::Node(OwlNode::Thing)),
+        )?;
+
+        data_buffer
+            .label_buffer
+            .insert(thing_id.clone(), "Thing".to_string());
+
+        data_buffer
+            .anchor_thing_map
+            .insert(anchor.clone(), thing_id.clone());
+
+        Ok(thing_id)
+    }
+
+    fn is_query_fallback_endpoint(term: &Term) -> bool {
+        *term == owl::THING.into() || *term == rdfs::LITERAL.into()
+    }
+
     fn insert_characteristic(
         &self,
         data_buffer: &mut SerializationDataBuffer,
@@ -3345,6 +3393,59 @@ impl GraphDisplayDataSolutionSerializer {
                 .contains_key(&resolved_property_term_id)
         };
         if property_is_known {
+            let is_object_like = matches!(
+                data_buffer.edge_element_buffer.get(&resolved_iri).copied(),
+                Some(ElementType::Owl(OwlType::Edge(
+                    OwlEdge::ObjectProperty
+                        | OwlEdge::ExternalProperty
+                        | OwlEdge::DeprecatedProperty
+                        | OwlEdge::InverseOf
+                ))) | Some(ElementType::Rdf(RdfType::Edge(RdfEdge::RdfProperty)))
+            );
+
+            if is_object_like {
+                if let Err(err) = self.materialize_implied_object_property_edge(
+                    data_buffer,
+                    &resolved_iri,
+                    triple.target.as_ref(),
+                ) {
+                    error!(
+                        "Failed to materialize implied property edge for '{}': {}",
+                        resolved_iri, err
+                    );
+                    self.add_to_unknown_buffer(data_buffer, resolved_iri, triple);
+                    return Ok(SerializationStatus::Deferred);
+                }
+
+                if let Some(edge) = data_buffer.property_edge_map.get(&resolved_iri).cloned() {
+                    let target_edges: Vec<Edge> = if edge.element_type
+                        == ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf))
+                    {
+                        data_buffer
+                            .edge_buffer
+                            .iter()
+                            .filter(|candidate| {
+                                candidate.element_type
+                                    == ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf))
+                                    && candidate.property.as_ref() == Some(&resolved_iri)
+                            })
+                            .cloned()
+                            .collect()
+                    } else {
+                        vec![edge]
+                    };
+
+                    for target_edge in target_edges {
+                        data_buffer
+                            .edge_characteristics
+                            .entry(target_edge)
+                            .or_default()
+                            .insert(characteristic);
+                    }
+                    return Ok(SerializationStatus::Serialized);
+                }
+            }
+
             debug!(
                 "Deferring characteristic '{}' for '{}': property known, edge not materialized yet",
                 characteristic,
