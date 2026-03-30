@@ -2394,14 +2394,12 @@ impl GraphDisplayDataSolutionSerializer {
         old: &Term,
         new: &Term,
     ) {
-        let Some(old_count) = data_buffer.individual_count_buffer.remove(old) else {
-            return;
+        if let Some(old_count) = data_buffer.individual_count_buffer.remove(old) {
+            *data_buffer
+                .individual_count_buffer
+                .entry(new.clone())
+                .or_default() += old_count;
         };
-
-        *data_buffer
-            .individual_count_buffer
-            .entry(new.clone())
-            .or_default() += old_count;
     }
 
     #[expect(
