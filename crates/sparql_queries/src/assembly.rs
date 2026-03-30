@@ -53,6 +53,9 @@ impl QueryAssembler {
                 .collect::<Vec<_>>()
                 .join(" UNION "),
         )
+        .as_str()
+        .trim_start()
+        .to_string()
     }
 
     /// Construct a filtered SPARQL query based on the truth value of entries in `element_filter`.
