@@ -330,7 +330,7 @@ impl UploadProgress {
         });
     }
 
-    #[allow(
+    #[expect(
         clippy::missing_errors_doc,
         reason = "why does clippy only complain about this method? (TODO: Add docs to all functions)"
     )]

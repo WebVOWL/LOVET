@@ -9,6 +9,7 @@ use crate::errors::ErrorLogContext;
 use leptos::prelude::*;
 use leptos::task::spawn_local_scoped_with_cancellation;
 use log::info;
+use std::iter::once;
 use strum::IntoEnumIterator;
 use vowlr_sparql_queries::prelude::DEFAULT_QUERY;
 use web_sys::Event;
@@ -20,15 +21,17 @@ const MAX_FILE_SIZE_BYTES: f64 = 50.0 * 1024.0 * 1024.0;
 pub fn SelectStaticInput() -> impl IntoView {
     let error_context = expect_context::<ErrorLogContext>();
 
-    let selected_ontology = RwSignal::new(StoredOntology::FriendOfAFriend);
+    let selected_ontology: RwSignal<Option<StoredOntology>> = RwSignal::new(None);
 
     let stored_res = LocalResource::new(move || async move {
-        match load_stored_ontology(selected_ontology.get()).await {
-            Ok(()) => {
-                load_graph(DEFAULT_QUERY.to_string(), true).await;
-            }
-            Err(e) => {
-                error_context.extend(e.records);
+        if let Some(stored) = selected_ontology.get() {
+            match load_stored_ontology(stored).await {
+                Ok(()) => {
+                    load_graph(DEFAULT_QUERY.to_string(), true).await;
+                }
+                Err(e) => {
+                    error_context.extend(e.records);
+                }
             }
         }
     });
@@ -41,7 +44,7 @@ pub fn SelectStaticInput() -> impl IntoView {
         }
         match name.try_into() {
             Ok(ontology) => {
-                selected_ontology.set(ontology);
+                selected_ontology.set(Some(ontology));
             }
             Err(e) => {
                 error_context.push(e.into());
@@ -50,10 +53,16 @@ pub fn SelectStaticInput() -> impl IntoView {
     };
 
     let ontologies = move || {
+        once(
+        selected_ontology.read().map_or_else(
+                    || view! { <option value="Select an ontology".to_string()>{"Select an ontology".to_string()}</option> }.into_any(),
+                    |_|
+                        ().into_any()
+                    )).chain(
         StoredOntology::iter()
             .map(|ontology| {
-                view! { <option value=ontology.to_string()>{ontology.to_string()}</option> }
-            })
+                view! { <option value=ontology.to_string()>{ontology.to_string()}</option> }.into_any()
+            }))
             .collect_view()
     };
 
@@ -62,7 +71,10 @@ pub fn SelectStaticInput() -> impl IntoView {
             <label class="block mb-1">"Premade Ontology:"</label>
             <select
                 class="p-1 w-full text-sm bg-gray-200 rounded border-b-0"
-                prop:value=selected_ontology.read().to_string()
+                prop:value=selected_ontology.read().map_or_else(
+                    || "Select an ontology".to_string(),
+                    |ontology| ontology.to_string(),
+                )
                 on:change=update_selected_ontology
             >
                 {ontologies()}
