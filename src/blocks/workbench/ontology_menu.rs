@@ -113,7 +113,10 @@ pub fn UploadInput() -> impl IntoView {
     Effect::new(move || {
         if let Some(value) = local_loading_done.get() {
             match value {
-                Ok(_) => spawn_local(async move {
+                Ok((_, _, opt_warn)) => spawn_local(async move {
+                    if let Some(warn) = opt_warn {
+                        error_context.push(warn);
+                    }
                     let output_result = handle_internal_sparql(DEFAULT_QUERY.to_string()).await;
                     match output_result {
                         Ok(new_graph_data) => {
@@ -129,7 +132,7 @@ pub fn UploadInput() -> impl IntoView {
                     }
                 }),
                 Err(e) => {
-                    error_context.push(e.into());
+                    error_context.extend(e.records);
                 }
             }
         }
@@ -138,7 +141,10 @@ pub fn UploadInput() -> impl IntoView {
     Effect::new(move || {
         if let Some(value) = remote_loading_done.get() {
             match value {
-                Ok(_) => spawn_local(async move {
+                Ok((_, _, opt_warn)) => spawn_local(async move {
+                    if let Some(warn) = opt_warn {
+                        error_context.push(warn);
+                    }
                     let output_result = handle_internal_sparql(DEFAULT_QUERY.to_string()).await;
                     match output_result {
                         Ok(new_graph_data) => {
@@ -154,7 +160,7 @@ pub fn UploadInput() -> impl IntoView {
                     }
                 }),
                 Err(e) => {
-                    error_context.push(e.into());
+                    error_context.extend(e.records);
                 }
             }
         }

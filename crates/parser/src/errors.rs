@@ -134,7 +134,16 @@ impl From<StorageError> for VOWLRStoreError {
 
 impl std::fmt::Display for VOWLRStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?} at {}", self.inner, self.location)
+        match &self.inner {
+            VOWLRStoreErrorKind::InvalidFileType(msg) => write!(f, "{msg}"),
+            VOWLRStoreErrorKind::HornedError(e) => write!(f, "{e}"),
+            VOWLRStoreErrorKind::IOError(e) => write!(f, "{e}"),
+            VOWLRStoreErrorKind::IriParseError(e) => write!(f, "{e}"),
+            VOWLRStoreErrorKind::LoaderError(e) => write!(f, "{e}"),
+            VOWLRStoreErrorKind::QueryEvaluationError(e) => write!(f, "{e}"),
+            VOWLRStoreErrorKind::JoinError(e) => write!(f, "{e}"),
+            VOWLRStoreErrorKind::StorageError(e) => write!(f, "{e}"),
+        }
     }
 }
 

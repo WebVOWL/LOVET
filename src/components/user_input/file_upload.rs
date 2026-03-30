@@ -17,7 +17,7 @@ use std::rc::Rc;
 use vowlr_database::prelude::{GraphDisplayDataSolutionSerializer, QueryResults, VOWLRStore};
 #[cfg(feature = "server")]
 use vowlr_parser::errors::VOWLRStoreError;
-use vowlr_util::prelude::{DataType, VOWLRError};
+use vowlr_util::prelude::{DataType, ErrorRecord, ErrorSeverity, ErrorType, VOWLRError};
 use web_sys::{FileList, FormData};
 
 const MAX_FILE_SIZE_BYTES: usize = 50 * 1024 * 1024;
@@ -89,7 +89,9 @@ pub async fn ontology_progress(filename: String) -> Result<TextStream, ServerFnE
 #[server(
     input = MultipartFormData,
 )]
-pub async fn handle_local(data: MultipartData) -> Result<(DataType, usize), ServerFnError> {
+pub async fn handle_local(
+    data: MultipartData,
+) -> Result<(DataType, usize, Option<ErrorRecord>), VOWLRError> {
     let mut session = VOWLRStore::default();
     #[expect(
         clippy::expect_used,
@@ -102,7 +104,7 @@ pub async fn handle_local(data: MultipartData) -> Result<(DataType, usize), Serv
         let name = field.file_name().unwrap_or_default().to_string();
 
         if name.is_empty() {
-            return Err(ServerFnError::new("Received empty file string"));
+            return Err(ServerFnError::new("Received empty file string").into());
         }
 
         info!("Receiving file '{name}'");
@@ -121,7 +123,8 @@ pub async fn handle_local(data: MultipartData) -> Result<(DataType, usize), Serv
                 return Err(ServerFnError::ServerError(format!(
                     "File {name} exceeds the maximum allowed size of {}MB.",
                     MAX_FILE_SIZE_BYTES / 1024 / 1024
-                )));
+                ))
+                .into());
             }
 
             session.upload_chunk(&chunk).await?;
@@ -133,21 +136,37 @@ pub async fn handle_local(data: MultipartData) -> Result<(DataType, usize), Serv
         }
     }
 
-    session.complete_upload().await?;
-    Ok((dtype, count))
+    let parsed_dtype = session.complete_upload().await?;
+    let warning = if parsed_dtype != dtype
+        && parsed_dtype != DataType::UNKNOWN
+        && dtype != DataType::UNKNOWN
+    {
+        Some(ErrorRecord::new(
+            ErrorSeverity::Warning,
+            ErrorType::Parser,
+            format!(
+                "The uploaded file had an incorrect file extension. It was parsed as {parsed_dtype} instead of {dtype}."
+            ),
+            #[cfg(debug_assertions)]
+            None,
+        ))
+    } else {
+        None
+    };
+    Ok((parsed_dtype, count, warning))
 }
 
 /// Remote reads url and calls for the datatype label and returns (label, data content)
 #[server]
-pub async fn handle_remote(url: String) -> Result<(DataType, usize), ServerFnError> {
+pub async fn handle_remote(
+    url: String,
+) -> Result<(DataType, usize, Option<ErrorRecord>), VOWLRError> {
     debug!("Sending request to remote: '{url}'");
     let client = Client::new();
     let resp = match client.get(&url).send().await {
         Ok(r) => r,
         Err(e) => {
-            return Err(ServerFnError::ServerError(format!(
-                "Error fetching URL: {e}"
-            )));
+            return Err(ServerFnError::ServerError(format!("Error fetching URL: {e}")).into());
         }
     };
 
@@ -157,17 +176,15 @@ pub async fn handle_remote(url: String) -> Result<(DataType, usize), ServerFnErr
             return Err(ServerFnError::ServerError(format!(
                 "Remote file exceeds the maximum allowed size of {}MB.",
                 MAX_FILE_SIZE_BYTES / 1024 / 1024
-            )));
+            ))
+            .into());
         }
     }
 
     let mut session = VOWLRStore::default();
     let progress_key = url.clone();
     progress::reset(&progress_key);
-    session
-        .start_upload(&url)
-        .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    session.start_upload(&url).await?;
 
     let mut total = 0;
     let dtype = Path::new(&url).into();
@@ -183,11 +200,24 @@ pub async fn handle_remote(url: String) -> Result<(DataType, usize), ServerFnErr
     }
 
     progress::remove(&progress_key);
-    session
-        .complete_upload()
-        .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-    Ok((dtype, total))
+    let parsed_dtype = session.complete_upload().await?;
+    let warning = if parsed_dtype != dtype
+        && parsed_dtype != DataType::UNKNOWN
+        && dtype != DataType::UNKNOWN
+    {
+        Some(ErrorRecord::new(
+            ErrorSeverity::Warning,
+            ErrorType::Parser,
+            format!(
+                "The remote file had an incorrect extension for its contents. It was parsed as {parsed_dtype} instead of {dtype}."
+            ),
+            #[cfg(debug_assertions)]
+            None,
+        ))
+    } else {
+        None
+    };
+    Ok((parsed_dtype, total, warning))
 }
 
 /// Sparql reads (endpoint + query) and calls for the datatype label and returns (label, data content)
@@ -196,7 +226,7 @@ pub async fn handle_sparql(
     endpoint: String,
     query: String,
     format: Option<String>,
-) -> Result<(DataType, usize), ServerFnError> {
+) -> Result<(DataType, usize, Option<ErrorRecord>), VOWLRError> {
     let client = Client::new();
     let mut session = VOWLRStore::default();
 
@@ -224,22 +254,18 @@ pub async fn handle_sparql(
             chunk_result.map_err(|e| ServerFnError::new(format!("Error reading chunk: {e}")))?;
 
         total += chunk.len();
-        session
-            .upload_chunk(&chunk)
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?;
+        session.upload_chunk(&chunk).await?;
         progress::add_chunk(&progress_key, chunk.len()).await;
     }
 
     progress::remove(&progress_key);
     session.complete_upload().await?;
-
     let dtype = if accept_type.contains("xml") {
         DataType::SPARQLXML
     } else {
         DataType::SPARQLJSON
     };
-    Ok((dtype, total))
+    Ok((dtype, total, None))
 }
 
 #[server (input = Rkyv, output = Rkyv)]
@@ -426,14 +452,15 @@ impl Default for UploadProgress {
 }
 
 /// handles what server side function to use (local, remote or sparql)
+pub type UploadResult = Result<(DataType, usize, Option<ErrorRecord>), VOWLRError>;
+pub type SparqlInput = (String, String, Option<String>);
+
 #[derive(Clone)]
 pub struct FileUpload {
     pub mode: RwSignal<String>,
-    pub local_action: Action<FormData, Result<(DataType, usize), ServerFnError>>,
-    pub remote_action: Action<String, Result<(DataType, usize), ServerFnError>>,
-    #[expect(clippy::type_complexity)]
-    pub sparql_action:
-        Action<(String, String, Option<String>), Result<(DataType, usize), ServerFnError>>,
+    pub local_action: Action<FormData, UploadResult>,
+    pub remote_action: Action<String, UploadResult>,
+    pub sparql_action: Action<SparqlInput, UploadResult>,
     pub tracker: Rc<UploadProgress>,
 }
 
@@ -442,21 +469,14 @@ impl FileUpload {
         let mode = RwSignal::new("local".to_string());
 
         let local_action =
-            Action::<FormData, Result<(DataType, usize), ServerFnError>>::new_local(|data| {
-                handle_local(data.clone().into())
-            });
+            Action::<FormData, UploadResult>::new_local(|data| handle_local(data.clone().into()));
 
-        let remote_action =
-            Action::<String, Result<(DataType, usize), ServerFnError>>::new(|url| {
-                handle_remote(url.clone())
-            });
+        let remote_action = Action::<String, UploadResult>::new(|url| handle_remote(url.clone()));
 
-        let sparql_action = Action::<
-            (String, String, Option<String>),
-            Result<(DataType, usize), ServerFnError>,
-        >::new(|(endpoint, query, format)| {
-            handle_sparql(endpoint.clone(), query.clone(), format.clone())
-        });
+        let sparql_action =
+            Action::<SparqlInput, UploadResult>::new(|(endpoint, query, format)| {
+                handle_sparql(endpoint.clone(), query.clone(), format.clone())
+            });
 
         let tracker = Rc::new(UploadProgress::new());
 
@@ -469,7 +489,7 @@ impl FileUpload {
         }
     }
 
-    pub fn get_result(&self) -> Option<Result<(DataType, usize), ServerFnError>> {
+    pub fn get_result(&self) -> Option<UploadResult> {
         match self.mode.get().as_str() {
             "local" => self.local_action.value().get(),
             "remote" => self.remote_action.value().get(),
