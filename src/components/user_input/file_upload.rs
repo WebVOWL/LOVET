@@ -13,10 +13,12 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 #[cfg(feature = "server")]
-use vowlr_database::prelude::{GraphDisplayDataSolutionSerializer, QueryResults, VOWLRStore};
+use vowlr_database::prelude::VOWLRStore;
 #[cfg(feature = "server")]
 use vowlr_parser::errors::VOWLRStoreError;
-use vowlr_util::prelude::{DataType, ErrorRecord, ErrorSeverity, ErrorType, VOWLRError};
+#[cfg(feature = "server")]
+use vowlr_parser::errors::VOWLRStoreErrorKind;
+use vowlr_util::prelude::{DataType, ErrorRecord, VOWLRError};
 use web_sys::{FileList, FormData};
 
 use crate::errors::ClientErrorKind;
@@ -90,7 +92,9 @@ pub async fn ontology_progress(filename: String) -> Result<TextStream, ServerFnE
 #[server(
     input = MultipartFormData,
 )]
-pub async fn handle_local(data: MultipartData) -> Result<(DataType, usize), VOWLRError> {
+pub async fn handle_local(
+    data: MultipartData,
+) -> Result<(DataType, usize, Option<VOWLRError>), VOWLRError> {
     let mut session = VOWLRStore::default();
 
     let mut data = data
@@ -139,15 +143,9 @@ pub async fn handle_local(data: MultipartData) -> Result<(DataType, usize), VOWL
         && parsed_dtype != DataType::UNKNOWN
         && dtype != DataType::UNKNOWN
     {
-        Some(ErrorRecord::new(
-            ErrorSeverity::Warning,
-            ErrorType::Parser,
-            format!(
-                "The uploaded file had an incorrect file extension. It was parsed as {parsed_dtype} instead of {dtype}."
-            ),
-            #[cfg(debug_assertions)]
-            None,
-        ))
+        Some(<VOWLRStoreError as Into<VOWLRError>>::into((format!(
+            "The uploaded file had an incorrect file extension. It was parsed as {parsed_dtype} instead of {dtype}."
+        )).into()))
     } else {
         None
     };
@@ -156,7 +154,9 @@ pub async fn handle_local(data: MultipartData) -> Result<(DataType, usize), VOWL
 
 /// Remote reads url and calls for the datatype label and returns (label, data content)
 #[server]
-pub async fn handle_remote(url: String) -> Result<(DataType, usize), VOWLRError> {
+pub async fn handle_remote(
+    url: String,
+) -> Result<(DataType, usize, Option<VOWLRError>), VOWLRError> {
     debug!("Sending request to remote: '{url}'");
     let client = Client::new();
     let resp = match client.get(&url).send().await {
@@ -196,8 +196,18 @@ pub async fn handle_remote(url: String) -> Result<(DataType, usize), VOWLRError>
     }
 
     progress::remove(&progress_key);
-    session.complete_upload().await?;
-    Ok((dtype, total))
+    let parsed_dtype = session.complete_upload().await?;
+    let warning = if parsed_dtype != dtype
+        && parsed_dtype != DataType::UNKNOWN
+        && dtype != DataType::UNKNOWN
+    {
+        Some(<VOWLRStoreError as Into<VOWLRError>>::into(VOWLRStoreErrorKind::InvalidFileType(format!(
+            "The uploaded file had an incorrect file extension. It was parsed as {parsed_dtype} instead of {dtype}."
+        )).into()))
+    } else {
+        None
+    };
+    Ok((parsed_dtype, total, warning))
 }
 
 /// Sparql reads (endpoint + query) and calls for the datatype label and returns (label, data content)
@@ -206,7 +216,7 @@ pub async fn handle_sparql(
     endpoint: String,
     query: String,
     format: Option<String>,
-) -> Result<(DataType, usize), VOWLRError> {
+) -> Result<(DataType, usize, Option<VOWLRError>), VOWLRError> {
     let client = Client::new();
     let mut session = VOWLRStore::default();
 
@@ -248,7 +258,7 @@ pub async fn handle_sparql(
     } else {
         DataType::SPARQLJSON
     };
-    Ok((dtype, total))
+    Ok((dtype, total, None))
 }
 
 pub struct UploadProgress {
@@ -414,11 +424,15 @@ pub type SparqlInput = (String, String, Option<String>);
 #[derive(Clone)]
 pub struct FileUpload {
     pub mode: RwSignal<String>,
-    pub local_action: Action<FormData, Result<(DataType, usize), VOWLRError>>,
-    pub remote_action: Action<String, Result<(DataType, usize), VOWLRError>>,
     #[expect(clippy::type_complexity)]
-    pub sparql_action:
-        Action<(String, String, Option<String>), Result<(DataType, usize), VOWLRError>>,
+    pub local_action: Action<FormData, Result<(DataType, usize, Option<VOWLRError>), VOWLRError>>,
+    #[expect(clippy::type_complexity)]
+    pub remote_action: Action<String, Result<(DataType, usize, Option<VOWLRError>), VOWLRError>>,
+    #[expect(clippy::type_complexity)]
+    pub sparql_action: Action<
+        (String, String, Option<String>),
+        Result<(DataType, usize, Option<VOWLRError>), VOWLRError>,
+    >,
     pub tracker: Rc<UploadProgress>,
 }
 
@@ -426,18 +440,19 @@ impl FileUpload {
     pub fn new() -> Self {
         let mode = RwSignal::new("local".to_string());
 
-        let local_action =
-            Action::<FormData, Result<(DataType, usize), VOWLRError>>::new_local(|data| {
-                handle_local(data.clone().into())
-            });
+        let local_action = Action::<
+            FormData,
+            Result<(DataType, usize, Option<VOWLRError>), VOWLRError>,
+        >::new_local(|data| handle_local(data.clone().into()));
 
-        let remote_action = Action::<String, Result<(DataType, usize), VOWLRError>>::new(|url| {
-            handle_remote(url.clone())
-        });
+        let remote_action = Action::<
+            String,
+            Result<(DataType, usize, Option<VOWLRError>), VOWLRError>,
+        >::new(|url| handle_remote(url.clone()));
 
         let sparql_action = Action::<
             (String, String, Option<String>),
-            Result<(DataType, usize), VOWLRError>,
+            Result<(DataType, usize, Option<VOWLRError>), VOWLRError>,
         >::new(|(endpoint, query, format)| {
             handle_sparql(endpoint.clone(), query.clone(), format.clone())
         });
@@ -452,8 +467,8 @@ impl FileUpload {
             tracker,
         }
     }
-
-    pub fn get_result(&self) -> Option<Result<(DataType, usize), VOWLRError>> {
+    #[expect(clippy::type_complexity)]
+    pub fn get_result(&self) -> Option<Result<(DataType, usize, Option<VOWLRError>), VOWLRError>> {
         match self.mode.get().as_str() {
             "local" => self.local_action.value().get(),
             "remote" => self.remote_action.value().get(),

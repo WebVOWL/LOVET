@@ -106,7 +106,10 @@ pub fn UploadInput() -> impl IntoView {
     Effect::new(move || {
         if let Some(value) = local_loading_done.get() {
             match value {
-                Ok(_) => {
+                Ok((_, _, warning)) => {
+                    if let Some(e) = warning {
+                        error_context.extend(e.records);
+                    }
                     spawn_local_scoped_with_cancellation(async move {
                         load_graph(DEFAULT_QUERY.to_string(), true).await;
                     });
@@ -121,7 +124,10 @@ pub fn UploadInput() -> impl IntoView {
     Effect::new(move || {
         if let Some(value) = remote_loading_done.get() {
             match value {
-                Ok(_) => {
+                Ok((_, _, warning)) => {
+                    if let Some(e) = warning {
+                        error_context.extend(e.records);
+                    }
                     spawn_local_scoped_with_cancellation(async move {
                         load_graph(DEFAULT_QUERY.to_string(), true).await;
                     });
