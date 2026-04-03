@@ -1,17 +1,36 @@
-use std::{panic::Location, rc::Rc};
+use std::{
+    panic::Location,
+    sync::{Arc, PoisonError},
+};
 
-use crate::serializers::Triple;
+use crate::serializers::{Edge, Triple};
 use oxrdf::{BlankNodeIdParseError, IriParseError};
 use vowlr_util::prelude::{ErrorRecord, ErrorSeverity, ErrorType, VOWLRError, get_timestamp};
 
 #[derive(Debug)]
 pub enum SerializationErrorKind {
     /// An error raised when the object of a triple is required but missing.
-    MissingObject(Rc<Triple>, String),
+    MissingObject(Arc<Triple>, String),
     /// An error raised when the subject of a triple is required but missing.
-    MissingSubject(Rc<Triple>, String),
+    MissingSubject(Arc<Triple>, String),
+    /// An error raised when the range of an edge is required but missing.
+    MissingRange(Arc<Edge>, String),
+    /// An error raised when the domain of an edge is required but missing.
+    MissingDomain(Arc<Edge>, String),
+    /// An error raised when the label of a term is required but missing.
+    MissingLabel(String),
+    /// An error raised when the property term of an edge is required but missing.
+    MissingProperty(String),
+    /// An error raised when the characteristics of a node term is required but missing.
+    MisisngCharacteristic(String),
+    /// An error raised when the individuals count for a node term is required but missing.
+    MissingIndividualsCount(String),
     /// An error raised when the serializer encountered an unrecoverable problem.
-    SerializationFailed(Rc<Triple>, String),
+    ///
+    /// Includes the problematic triple.
+    SerializationFailedTriple(Arc<Triple>, String),
+    /// An error raised when the serializer encountered an unrecoverable problem.
+    SerializationFailed(String),
     /// An error raised during Iri or IriRef validation.
     IriParseError(String, Box<IriParseError>),
     /// An error raised during BlankNode IDs validation.
@@ -20,6 +39,11 @@ pub enum SerializationErrorKind {
     ///
     /// Some types are: SELECT, ASK, CONSTRUCT.
     UnsupportedQueryType(String),
+    /// Errors related to the term index.
+    TermIndexError(String),
+    /// An error raised if a lock becomes poisoned, e.g., if a thread panics
+    /// while holding a write lock.
+    LockPoisoned(String),
 }
 
 impl From<SerializationErrorKind> for VOWLRError {
@@ -47,8 +71,19 @@ impl std::fmt::Display for SerializationError {
 impl From<SerializationErrorKind> for SerializationError {
     #[track_caller]
     fn from(error: SerializationErrorKind) -> Self {
-        SerializationError {
+        Self {
             inner: error,
+            location: Location::caller(),
+            timestamp: get_timestamp(),
+        }
+    }
+}
+
+impl<T> From<PoisonError<T>> for SerializationError {
+    #[track_caller]
+    fn from(value: PoisonError<T>) -> Self {
+        Self {
+            inner: SerializationErrorKind::LockPoisoned(value.to_string()),
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -58,24 +93,33 @@ impl From<SerializationErrorKind> for SerializationError {
 impl From<SerializationError> for ErrorRecord {
     fn from(value: SerializationError) -> Self {
         let (message, severity) = match value.inner {
-            SerializationErrorKind::MissingObject(triple, e) => {
+            SerializationErrorKind::MissingObject(triple, e)
+            | SerializationErrorKind::MissingSubject(triple, e) => {
                 (format!("{e}:\n{triple}"), ErrorSeverity::Warning)
             }
-            SerializationErrorKind::MissingSubject(triple, e) => {
-                (format!("{e}:\n{triple}"), ErrorSeverity::Warning)
+            SerializationErrorKind::MissingDomain(edge, e)
+            | SerializationErrorKind::MissingRange(edge, e) => {
+                (format!("{e}:\n{edge}"), ErrorSeverity::Warning)
             }
-            SerializationErrorKind::SerializationFailed(triple, e) => {
+            SerializationErrorKind::MissingLabel(e)
+            | SerializationErrorKind::MissingProperty(e)
+            | SerializationErrorKind::MisisngCharacteristic(e)
+            | SerializationErrorKind::MissingIndividualsCount(e) => (e, ErrorSeverity::Warning),
+            SerializationErrorKind::SerializationFailedTriple(triple, e) => {
                 (format!("{e}:\n{triple}"), ErrorSeverity::Critical)
             }
             SerializationErrorKind::IriParseError(iri, iri_parse_error) => (
-                format!("{iri_parse_error} (IRI: {iri})"),
+                format!("{iri_parse_error}\nIRI: {iri}"),
                 ErrorSeverity::Error,
             ),
             SerializationErrorKind::BlankNodeParseError(id, blank_node_id_parse_error) => (
-                format!("{blank_node_id_parse_error} (ID: {id})"),
+                format!("{blank_node_id_parse_error}\nID: {id}"),
                 ErrorSeverity::Error,
             ),
-            SerializationErrorKind::UnsupportedQueryType(e) => (e, ErrorSeverity::Critical),
+            SerializationErrorKind::SerializationFailed(e)
+            | SerializationErrorKind::UnsupportedQueryType(e)
+            | SerializationErrorKind::TermIndexError(e)
+            | SerializationErrorKind::LockPoisoned(e) => (e, ErrorSeverity::Critical),
         };
         ErrorRecord::new(
             value.timestamp,
