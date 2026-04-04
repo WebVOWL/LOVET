@@ -92,7 +92,7 @@ impl VOWLRStore {
                 let mut data_buffer = GraphDisplayData::new();
 
                 let maybe_errors = solution_serializer
-                    .serialize_nodes_stream(&mut data_buffer, query_solution_stream)
+                    .par_serialize_solution_stream(&mut data_buffer, query_solution_stream)
                     .await?;
                 Ok((data_buffer, maybe_errors))
             }
