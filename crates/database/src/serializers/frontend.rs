@@ -47,17 +47,14 @@ pub enum SerializationStatus {
     Deferred,
 }
 
-pub struct GraphDisplayDataSolutionSerializer;
-
-impl Default for GraphDisplayDataSolutionSerializer {
-    fn default() -> Self {
-        Self::new()
-    }
+#[derive(Default)]
+pub struct GraphDisplayDataSolutionSerializer {
+    document_base_warning_fired: Arc<RwLock<bool>>,
 }
 
 impl GraphDisplayDataSolutionSerializer {
     pub fn new() -> Self {
-        Self {}
+        Self::default()
     }
 
     #[expect(unused, reason = "performance currently less than single-threaded")]
