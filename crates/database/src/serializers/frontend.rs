@@ -303,7 +303,7 @@ impl GraphDisplayDataSolutionSerializer {
             \tCharacteristics     : {}\n\n \
         ",
             query_finish_time,
-            finish_time,
+            finish_time - query_finish_time,
             data_buffer.node_element_buffer.read()?.len(),
             data_buffer.edge_buffer.read()?.len(),
             data_buffer.label_buffer.read()?.len(),
