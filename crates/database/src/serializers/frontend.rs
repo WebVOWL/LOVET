@@ -60,6 +60,7 @@ impl GraphDisplayDataSolutionSerializer {
         Self {}
     }
 
+    #[expect(unused, reason = "performance currently less than single-threaded")]
     /// Serializes a query solution stream into the data buffer using all available threads.
     ///
     /// This method tries to continue serializing despite errors.
