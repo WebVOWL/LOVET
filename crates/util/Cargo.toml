@@ -26,11 +26,7 @@
     tabled={version="0.20", optional=true}
     time={version="0.3.47", features=["formatting", "macros"]}
     uuid={version="1.22.0", features=["v4"], optional=true}
-    web-sys={workspace=true, features=[
-        "Window",
-        "Performance",
-        "PerformanceTiming",
-    ], optional=true}
+    web-sys={workspace=true, features=["Window", "Performance"], optional=true}
 
 [features]
     server=["dep:tabled"]
