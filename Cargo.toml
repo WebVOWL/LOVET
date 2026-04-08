@@ -199,7 +199,7 @@
     lto=true
     opt-level=3
     overflow-checks=false
-    panic="abort"
+    panic="unwind"
 
 # Defines a size-optimized profile for the WASM bundle in release mode
 [profile.wasm-release]
