@@ -58,8 +58,6 @@ pub fn SimulatorSettings() -> impl IntoView {
                         max="200.0"
                         step="10.0"
                     ></Slider>
-              {  // </ToolTip<f64>>
-              }
                 <Slider
                     label="Edge Length"
                     value=spring_neutral_length
