@@ -22,6 +22,7 @@ static GLOBAL_STORE: std::sync::OnceLock<Store> = std::sync::OnceLock::new();
 pub struct VOWLRStore {
     /// The store is the quad database and SPARQL engine.
     pub session: Store,
+    /// The unique ID for the current user.
     pub user_id: Option<String>,
     upload_handle: Option<tempfile::NamedTempFile>,
 }
@@ -36,6 +37,7 @@ impl VOWLRStore {
         }
     }
 
+    /// Create a new database instance with user_id. 
     pub fn new_for_user(user_id: String) -> Self {
         let session = GLOBAL_STORE.get_or_init(Store::default).clone();
         Self {
@@ -45,6 +47,7 @@ impl VOWLRStore {
         }
     }
 
+    /// Update graph name (4th element in quad) with a compination of user_id and name of graph.
     pub fn get_graph_iri(&self, filename: &str) -> String {
         let filename = filename
             .replace(" ", "_")
@@ -184,6 +187,10 @@ impl VOWLRStore {
         }
     }
 
+    
+    /// Inserts a file into the store.
+    ///
+    /// Files are automatically parsed.
     pub async fn complete_upload(&mut self, filename: &str) -> Result<(), VOWLRStoreError> {
         let graph_iri = self.get_graph_iri(filename);
         if let Some(file) = &mut self.upload_handle {
