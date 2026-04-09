@@ -7942,6 +7942,7 @@ dependencies = [
  "rayon",
  "rdf-fusion",
  "smallvec",
+ "strum 0.27.2",
  "tempfile",
  "test-generator",
  "tokio",
