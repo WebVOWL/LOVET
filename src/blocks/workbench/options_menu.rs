@@ -42,22 +42,21 @@ pub fn SimulatorSettings() -> impl IntoView {
         <fieldset>
             <legend>"Graph Simulation"</legend>
             <div class="flex flex-col content-around m-4 size-fit">
-  <Slider
-                        label="Node Distance"
-                        value=repel_force
-                        min=(-10e8).to_string()
-                        max=(-10e6).to_string()
-                        step=(-10e3).to_string()
-                    ></Slider>
-                {// </ToolTip<f64>>
+                <Slider
+                    label="Node Distance"
+                    value=repel_force
+                    min=(-10e8).to_string()
+                    max=(-10e6).to_string()
+                    step=(-10e3).to_string()
+                ></Slider>
 
- <Slider
-                        label="Edge Stiffness"
-                        value=spring_stiffness
-                        min="50.0"
-                        max="200.0"
-                        step="10.0"
-                    ></Slider>
+                <Slider
+                    label="Edge Stiffness"
+                    value=spring_stiffness
+                    min="50.0"
+                    max="200.0"
+                    step="10.0"
+                ></Slider>
                 <Slider
                     label="Edge Length"
                     value=spring_neutral_length
