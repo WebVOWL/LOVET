@@ -23,7 +23,7 @@ fn par_serialize(c: &mut Criterion) {
             .iter(async || {
                 // TODO: Make the store use the parallel version
                 let _ = store
-                    .query(DEFAULT_QUERY.to_string())
+                    .query(DEFAULT_QUERY.to_string(), None)
                     .await
                     .expect("query should work");
             });
