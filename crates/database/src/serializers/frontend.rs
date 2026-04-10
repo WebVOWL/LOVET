@@ -595,6 +595,10 @@ impl GraphDisplayDataSolutionSerializer {
                 .insert(old_term_id, new_term_id);
         }
         self.check_unknown_buffer(data_buffer, &old_term_id)?;
+        self.mark_restrictions_waiting_on_property(data_buffer, old);
+        self.mark_restrictions_waiting_on_property(data_buffer, new);
+        self.mark_restrictions_waiting_on_term(data_buffer, old);
+        self.mark_restrictions_waiting_on_term(data_buffer, new);
         Ok(())
     }
 
@@ -658,13 +662,13 @@ impl GraphDisplayDataSolutionSerializer {
             node_type
         };
 
-        self.add_triple_to_element_buffer(
-            &data_buffer.term_index,
-            &mut data_buffer.node_element_buffer,
-            &triple,
-            new_type,
-        )?;
-        self.check_unknown_buffer(data_buffer, &triple.subject_term_id)?;
+        self.add_to_element_buffer(&mut data_buffer.node_element_buffer, triple, new_type);
+        self.check_unknown_buffer(data_buffer, &triple.id)?;
+        self.mark_restrictions_waiting_on_term(data_buffer, &triple.id);
+
+        if retry_restrictions {
+            self.retry_restrictions(data_buffer)?;
+        }
 
         Ok(())
     }
@@ -985,31 +989,9 @@ impl GraphDisplayDataSolutionSerializer {
             return;
         };
 
-        match data_buffer.label_buffer.get_mut(new) {
-            Some(existing) if *existing == old_label => {}
-            Some(existing) => {
-                existing.push('\n');
-                existing.push_str(&old_label);
-            }
-            None => {
-                data_buffer.label_buffer.insert(new.clone(), old_label);
-            }
-        }
-    }
+        self.untrack_restriction_dependencies(data_buffer, old);
 
-    fn merge_restriction_state(
-        &self,
-        data_buffer: &mut SerializationDataBuffer,
-        old_term_id: usize,
-        new_term_id: usize,
-    ) -> Result<(), SerializationError> {
-        let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-
-        let Some(old_state) = restriction_buffer.remove(&old_term_id) else {
-            return Ok(());
-        };
-
-        let RestrictionState {
+        let super::RestrictionState {
             on_property,
             filler,
             cardinality,
@@ -1036,6 +1018,9 @@ impl GraphDisplayDataSolutionSerializer {
         if new_state.render_mode == RestrictionRenderMode::ValuesFromEdge {
             new_state.render_mode = *render_mode;
         }
+
+        self.track_restriction_dependencies(data_buffer, new);
+        data_buffer.mark_restriction_dirty(new);
         Ok(())
     }
 
@@ -2137,7 +2122,12 @@ impl GraphDisplayDataSolutionSerializer {
                                 &target,
                                 &resolved_subject,
                             );
-                            return self.try_materialize_restriction(data_buffer, &target);
+                            self.retry_restrictions(data_buffer)?;
+                            return Ok(if data_buffer.restriction_buffer.contains_key(&target) {
+                                SerializationStatus::Deferred
+                            } else {
+                                SerializationStatus::Serialized
+                            });
                         }
 
                         match self.insert_edge(
@@ -2168,19 +2158,10 @@ impl GraphDisplayDataSolutionSerializer {
                     // owl::ALL_DISJOINT_CLASSES => {},
                     // owl::ALL_DISJOINT_PROPERTIES => {},
                     owl::ALL_VALUES_FROM => {
-                        {
-                            let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-                            let mut state = restriction_buffer
-                                .entry(triple.subject_term_id)
-                                .or_default()
-                                .write()?;
-                            state.filler = triple.object_term_id;
-                            // TODO: Make cardinality enum in grapher.
+                        return self.update_restriction_state(data_buffer, &triple.id, |state| {
+                            state.filler = triple.target.clone();
                             state.cardinality = Some(("∀".to_string(), None));
-                        }
-
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        });
                     }
 
                     // owl::ANNOTATED_PROPERTY => {},
@@ -2206,33 +2187,17 @@ impl GraphDisplayDataSolutionSerializer {
                     // owl::BOTTOM_DATA_PROPERTY => {},
                     // owl::BOTTOM_OBJECT_PROPERTY => {},
                     owl::CARDINALITY => {
-                        let exact = Self::cardinality_literal(data_buffer, &triple)?;
-                        {
-                            let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-                            let mut state = restriction_buffer
-                                .entry(triple.subject_term_id)
-                                .or_default()
-                                .write()?;
+                        let exact = Self::cardinality_literal(&triple)?;
+                        return self.update_restriction_state(data_buffer, &triple.id, |state| {
                             state.cardinality = Some((exact.clone(), Some(exact)));
-                        }
-
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        });
                     }
                     owl::QUALIFIED_CARDINALITY => {
-                        let exact = Self::cardinality_literal(data_buffer, &triple)?;
-                        {
-                            let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-                            let mut state = restriction_buffer
-                                .entry(triple.subject_term_id)
-                                .or_default()
-                                .write()?;
+                        let exact = Self::cardinality_literal(&triple)?;
+                        return self.update_restriction_state(data_buffer, &triple.id, |state| {
                             state.cardinality = Some((exact.clone(), Some(exact)));
                             state.requires_filler = true;
-                        }
-
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        });
                     }
                     owl::CLASS => {
                         self.insert_node(
@@ -2254,29 +2219,22 @@ impl GraphDisplayDataSolutionSerializer {
                             return Ok(SerializationStatus::Serialized);
                         }
 
-                        let edge = self.insert_edge(
-                            data_buffer,
-                            triple.clone(),
-                            ElementType::NoDraw,
-                            None,
-                        )?;
+                        match self.insert_edge(data_buffer, &triple, ElementType::NoDraw, None) {
+                            Some(edge) => {
+                                if !Self::has_named_equivalent_aliases(data_buffer, &edge.subject) {
+                                    self.upgrade_node_type(
+                                        data_buffer,
+                                        &edge.subject,
+                                        ElementType::Owl(OwlType::Node(OwlNode::Complement)),
+                                    );
+                                }
 
-                        if triple.object_term_id.is_some()
-                            && let Some(index) =
-                                self.resolve(data_buffer, triple.subject_term_id)?
-                            && !Self::has_named_equivalent_aliases(data_buffer, &index)?
-                        {
-                            self.upgrade_node_type(
-                                data_buffer,
-                                index,
-                                ElementType::Owl(OwlType::Node(OwlNode::Complement)),
-                            )?;
-                        }
-
-                        if edge.is_some() {
-                            return Ok(SerializationStatus::Serialized);
-                        } else {
-                            return Ok(SerializationStatus::Deferred);
+                                self.register_structural_restriction_owner(data_buffer, &edge)?;
+                                return Ok(SerializationStatus::Serialized);
+                            }
+                            None => {
+                                return Ok(SerializationStatus::Deferred);
+                            }
                         }
                     }
 
@@ -2291,6 +2249,7 @@ impl GraphDisplayDataSolutionSerializer {
                             e,
                         )?;
                         self.check_unknown_buffer(data_buffer, &triple.subject_term_id)?;
+                        self.mark_restrictions_waiting_on_property(data_buffer, &triple.id);
                         return Ok(SerializationStatus::Serialized);
                     }
 
@@ -2392,6 +2351,8 @@ impl GraphDisplayDataSolutionSerializer {
                                         ElementType::Owl(OwlType::Node(OwlNode::DisjointUnion)),
                                     )?;
                                 }
+
+                                self.register_structural_restriction_owner(data_buffer, &edge)?;
                                 return Ok(SerializationStatus::Serialized);
                             }
                             None => {
@@ -2558,36 +2519,25 @@ impl GraphDisplayDataSolutionSerializer {
                         };
 
                         if truthy {
-                            {
-                                let mut restriction_buffer =
-                                    data_buffer.restriction_buffer.write()?;
-                                let mut state = restriction_buffer
-                                    .entry(triple.subject_term_id)
-                                    .or_default()
-                                    .write()?;
-                                state.self_restriction = true;
-                                state.cardinality = Some(("self".to_string(), None));
-                            }
+                            return self.update_restriction_state(
+                                data_buffer,
+                                &triple.id,
+                                |state| {
+                                    state.self_restriction = true;
+                                    state.cardinality = Some(("self".to_string(), None));
+                                },
+                            );
                         }
 
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        return Ok(SerializationStatus::Serialized);
                     }
 
                     owl::HAS_VALUE => {
-                        {
-                            let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-                            let mut state = restriction_buffer
-                                .entry(triple.subject_term_id)
-                                .or_default()
-                                .write()?;
-                            state.filler = triple.object_term_id;
+                        return self.update_restriction_state(data_buffer, &triple.id, |state| {
+                            state.filler = triple.target.clone();
                             state.cardinality = Some(("value".to_string(), None));
                             state.render_mode = RestrictionRenderMode::ExistingPropertyEdge;
-                        }
-
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        });
                     }
 
                     // owl::IMPORTS => {}
@@ -2616,6 +2566,8 @@ impl GraphDisplayDataSolutionSerializer {
                                         ElementType::Owl(OwlType::Node(OwlNode::IntersectionOf)),
                                     )?;
                                 }
+
+                                self.register_structural_restriction_owner(data_buffer, &edge)?;
                                 return Ok(SerializationStatus::Serialized);
                             }
                             None => {
@@ -2650,66 +2602,32 @@ impl GraphDisplayDataSolutionSerializer {
                     }
 
                     owl::MAX_CARDINALITY => {
-                        let max = Self::cardinality_literal(data_buffer, &triple)?;
-                        {
-                            let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-                            let mut state = restriction_buffer
-                                .entry(triple.subject_term_id)
-                                .or_default()
-                                .write()?;
+                        let max = Self::cardinality_literal(&triple)?;
+                        return self.update_restriction_state(data_buffer, &triple.id, |state| {
                             state.cardinality = Some((String::new(), Some(max)));
-                        }
-
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        });
                     }
 
                     owl::MAX_QUALIFIED_CARDINALITY => {
-                        {
-                            let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-                            let mut state = restriction_buffer
-                                .entry(triple.subject_term_id)
-                                .or_default()
-                                .write()?;
-                            state.cardinality = Some((
-                                String::new(),
-                                Some(Self::cardinality_literal(data_buffer, &triple)?),
-                            ));
+                        let max = Self::cardinality_literal(&triple)?;
+                        return self.update_restriction_state(data_buffer, &triple.id, |state| {
+                            state.cardinality = Some((String::new(), Some(max)));
                             state.requires_filler = true;
-                        }
-
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        });
                     }
                     // owl::MEMBERS => {}
                     owl::MIN_CARDINALITY => {
-                        let min = Self::cardinality_literal(data_buffer, &triple)?;
-                        {
-                            let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-                            let mut state = restriction_buffer
-                                .entry(triple.subject_term_id)
-                                .or_default()
-                                .write()?;
+                        let min = Self::cardinality_literal(&triple)?;
+                        return self.update_restriction_state(data_buffer, &triple.id, |state| {
                             state.cardinality = Some((min, None));
-                        }
-
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        });
                     }
                     owl::MIN_QUALIFIED_CARDINALITY => {
-                        {
-                            let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-                            let mut state = restriction_buffer
-                                .entry(triple.subject_term_id)
-                                .or_default()
-                                .write()?;
-                            state.cardinality =
-                                Some((Self::cardinality_literal(data_buffer, &triple)?, None));
+                        let min = Self::cardinality_literal(&triple)?;
+                        return self.update_restriction_state(data_buffer, &triple.id, |state| {
+                            state.cardinality = Some((min, None));
                             state.requires_filler = true;
-                        }
-
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        });
                     }
                     owl::NAMED_INDIVIDUAL => {
                         let count = Self::individual_count_literal(data_buffer, &triple)?;
@@ -2732,6 +2650,7 @@ impl GraphDisplayDataSolutionSerializer {
                             ElementType::Owl(OwlType::Edge(OwlEdge::ObjectProperty)),
                         )?;
                         self.check_unknown_buffer(data_buffer, &triple.subject_term_id)?;
+                        self.mark_restrictions_waiting_on_property(data_buffer, &triple.id);
                         return Ok(SerializationStatus::Serialized);
                     }
                     owl::ONE_OF => {
@@ -2790,18 +2709,10 @@ impl GraphDisplayDataSolutionSerializer {
                     //TODO: OWL1
                     // owl::ONTOLOGY_PROPERTY => {}
                     owl::ON_CLASS | owl::ON_DATARANGE => {
-                        {
-                            let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-                            let mut state = restriction_buffer
-                                .entry(triple.subject_term_id)
-                                .or_default()
-                                .write()?;
-                            state.filler = triple.object_term_id;
+                        return self.update_restriction_state(data_buffer, &triple.id, |state| {
+                            state.filler = triple.target.clone();
                             state.requires_filler = true;
-                        }
-
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        });
                     }
                     // owl::ON_DATATYPE => {}
                     // owl::ON_PROPERTIES => {}
@@ -2814,17 +2725,9 @@ impl GraphDisplayDataSolutionSerializer {
                             .into());
                         };
 
-                        {
-                            let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-                            let mut state = restriction_buffer
-                                .entry(triple.subject_term_id)
-                                .or_default()
-                                .write()?;
+                        return self.update_restriction_state(data_buffer, &triple.id, |state| {
                             state.on_property = Some(target);
-                        }
-
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        });
                     }
 
                     // owl::PRIOR_VERSION => {}
@@ -2846,18 +2749,10 @@ impl GraphDisplayDataSolutionSerializer {
                     //TODO: OWL1
                     // owl::SAME_AS => {}
                     owl::SOME_VALUES_FROM => {
-                        {
-                            let mut restriction_buffer = data_buffer.restriction_buffer.write()?;
-                            let mut state = restriction_buffer
-                                .entry(triple.subject_term_id)
-                                .or_default()
-                                .write()?;
-                            state.filler = triple.object_term_id;
+                        return self.update_restriction_state(data_buffer, &triple.id, |state| {
+                            state.filler = triple.target.clone();
                             state.cardinality = Some(("∃".to_string(), None));
-                        }
-
-                        return self
-                            .try_materialize_restriction(data_buffer, &triple.subject_term_id);
+                        });
                     }
                     // owl::SOURCE_INDIVIDUAL => {}
                     owl::SYMMETRIC_PROPERTY => {
@@ -2912,6 +2807,8 @@ impl GraphDisplayDataSolutionSerializer {
                                         ElementType::Owl(OwlType::Node(OwlNode::UnionOf)),
                                     )?;
                                 }
+
+                                self.register_structural_restriction_owner(data_buffer, &edge)?;
                                 return Ok(SerializationStatus::Serialized);
                             }
                             None => {
@@ -3411,6 +3308,11 @@ impl GraphDisplayDataSolutionSerializer {
                                             .insert(property_iri.clone(), HashSet::from([object]));
 
                                         self.check_unknown_buffer(data_buffer, &property_iri)?;
+                                        self.mark_restrictions_waiting_on_property(
+                                            data_buffer,
+                                            &property_iri,
+                                        );
+                                        self.retry_restrictions(data_buffer)?;
                                         let edge_triple_predicate_term_id =
                                             data_buffer.get_predicate(&edge_triple)?;
                                         let property = {
@@ -3688,6 +3590,7 @@ impl GraphDisplayDataSolutionSerializer {
         );
 
         self.check_unknown_buffer(data_buffer, property_iri)?;
+        self.mark_restrictions_waiting_on_property(data_buffer, property_iri);
         Ok(())
     }
 
@@ -3739,6 +3642,8 @@ impl GraphDisplayDataSolutionSerializer {
         data_buffer.add_property_edge(property_iri.clone(), edge);
         data_buffer.add_property_domain(property_iri.clone(), subject);
         data_buffer.add_property_range(property_iri.clone(), object);
+
+        self.mark_restrictions_waiting_on_property(data_buffer, property_iri);
 
         Ok(())
     }
@@ -4030,15 +3935,96 @@ impl GraphDisplayDataSolutionSerializer {
         Ok(result)
     }
 
-    fn register_restriction_owner(
+    fn is_consumed_restriction(data_buffer: &SerializationDataBuffer, restriction: &Term) -> bool {
+        data_buffer.materialized_restrictions.contains(restriction)
+    }
+
+    fn track_restriction_dependencies(
         &self,
         data_buffer: &mut SerializationDataBuffer,
         restriction: &Term,
-        owner: &Term,
     ) {
+        let Some(state) = data_buffer.restriction_buffer.get(restriction) else {
+            return;
+        };
+
+        if let Some(property) = state.on_property.as_ref() {
+            data_buffer
+                .restriction_by_property
+                .entry(property.clone())
+                .or_default()
+                .insert(restriction.clone());
+        }
+
+        if let Some(filler) = state.filler.as_ref()
+            && matches!(filler, Term::NamedNode(_) | Term::BlankNode(_))
+        {
+            data_buffer
+                .restriction_by_filler
+                .entry(filler.clone())
+                .or_default()
+                .insert(restriction.clone());
+        }
+    }
+
+    fn untrack_restriction_dependencies(
+        &self,
+        data_buffer: &mut SerializationDataBuffer,
+        restriction: &Term,
+    ) {
+        for restrictions in data_buffer.restriction_by_property.values_mut() {
+            restrictions.remove(restriction);
+        }
         data_buffer
-            .restriction_owner_map
-            .insert(restriction.clone(), owner.clone());
+            .restriction_by_property
+            .retain(|_, restrictions| !restrictions.is_empty());
+
+        for restrictions in data_buffer.restriction_by_filler.values_mut() {
+            restrictions.remove(restriction);
+        }
+        data_buffer
+            .restriction_by_filler
+            .retain(|_, restrictions| !restrictions.is_empty());
+    }
+
+    fn mark_restrictions_waiting_on_property(
+        &self,
+        data_buffer: &mut SerializationDataBuffer,
+        property: &Term,
+    ) {
+        let mut affected = HashSet::new();
+
+        if let Some(restrictions) = data_buffer.restriction_by_property.get(property) {
+            affected.extend(restrictions.iter().cloned());
+        }
+
+        if let Some(resolved) = self.resolve(data_buffer, property.clone())
+            && let Some(restrictions) = data_buffer.restriction_by_property.get(&resolved)
+        {
+            affected.extend(restrictions.iter().cloned());
+        }
+
+        data_buffer.dirty_restrictions.extend(affected);
+    }
+
+    fn mark_restrictions_waiting_on_term(
+        &self,
+        data_buffer: &mut SerializationDataBuffer,
+        term: &Term,
+    ) {
+        let mut affected = HashSet::new();
+
+        if let Some(restrictions) = data_buffer.restriction_by_filler.get(term) {
+            affected.extend(restrictions.iter().cloned());
+        }
+
+        if let Some(resolved) = self.resolve(data_buffer, term.clone())
+            && let Some(restrictions) = data_buffer.restriction_by_filler.get(&resolved)
+        {
+            affected.extend(restrictions.iter().cloned());
+        }
+
+        data_buffer.dirty_restrictions.extend(affected);
     }
 
     fn register_restriction_owner(
@@ -4050,6 +4036,7 @@ impl GraphDisplayDataSolutionSerializer {
         data_buffer
             .restriction_owner_map
             .insert(restriction.clone(), owner.clone());
+        data_buffer.mark_restriction_dirty(restriction);
     }
 
     fn restriction_owner(
@@ -4071,11 +4058,26 @@ impl GraphDisplayDataSolutionSerializer {
             .get(restriction_term_id)
             .and_then(|edges| {
                 edges.iter().find_map(|edge| {
-                    (edge.range_term_id == *restriction_term_id && is_restriction_owner_edge(edge))
-                        .then(|| edge.domain_term_id)
+                    (edge.object == *restriction && Self::is_restriction_owner_edge(edge))
+                        .then(|| edge.subject.clone())
                 })
             });
         Ok(result)
+    }
+
+    fn register_structural_restriction_owner(
+        &self,
+        data_buffer: &mut SerializationDataBuffer,
+        edge: &Edge,
+    ) -> Result<(), SerializationError> {
+        let target = edge.object.clone();
+
+        if target.is_blank_node() || data_buffer.restriction_buffer.contains_key(&target) {
+            self.register_restriction_owner(data_buffer, &target, &edge.subject);
+            self.retry_restrictions(data_buffer)?;
+        }
+
+        Ok(())
     }
 
     fn remove_restriction_stub(
@@ -4106,10 +4108,13 @@ impl GraphDisplayDataSolutionSerializer {
         data_buffer: &mut SerializationDataBuffer,
         restriction: &Term,
     ) {
+        self.untrack_restriction_dependencies(data_buffer, restriction);
+        data_buffer.dirty_restrictions.remove(restriction);
         data_buffer.restriction_owner_map.remove(restriction);
+        data_buffer
+            .materialized_restrictions
+            .insert(restriction.clone());
 
-        // Named classes can temporarily carry restriction state after merging
-        // an anonymous equivalentClass expression. Clear only the restriction state.
         if !Self::is_ephemeral_restriction_node(data_buffer, restriction) {
             data_buffer.restriction_buffer.remove(restriction);
             return;
@@ -4329,7 +4334,7 @@ impl GraphDisplayDataSolutionSerializer {
 
         let state = state_lock.read()?;
 
-        let Some(raw_property_term_id) = state.on_property else {
+        let Some(raw_property_term_id) = state.on_property.clone() else {
             debug!(
                 "Deferring restriction for term '{}': restriction property not available",
                 data_buffer.term_index.get(restriction_term_id)?
@@ -4351,6 +4356,7 @@ impl GraphDisplayDataSolutionSerializer {
             );
             return Ok(SerializationStatus::Deferred);
         };
+
         if state.requires_filler && !state.self_restriction && state.filler.is_none() {
             debug!(
                 "Deferring restriction for term '{}': filler is required, but not available",
@@ -4384,34 +4390,21 @@ impl GraphDisplayDataSolutionSerializer {
         };
 
         if state.render_mode == RestrictionRenderMode::ExistingPropertyEdge {
-            if let Some(existing_edge) = data_buffer
-                .property_edge_map
-                .read()?
-                .get(&property_term_id)
-                .cloned() {
-                debug!(
-                    "Deferring restriction for term '{}': edge not yet created",
-                    data_buffer.term_index.get(restriction_term_id)?
-                );
-                let object_term_id = if let Some(filler_id) = state.filler.as_ref() {
-                    let filler_term = data_buffer.term_index.get(filler_id)?;
-                match &*filler_term {
-                        Term::Literal(literal) => {
-                            data_buffer
-                                .label_buffer
-                                .write()?
-                            .insert(existing_edge.range_term_id, literal.value().to_string());
-                            existing_edge.range_term_id
-                        }
-                        _ => match self.resolve(data_buffer, *filler_id)? {
+            if let Some(existing_edge) = data_buffer.property_edge_map.get(&property_iri).cloned() {
+                let object = if state.self_restriction {
+                    subject.clone()
+                } else if let Some(filler) = state.filler.clone() {
+                    match filler {
+                        Term::Literal(literal) => self.materialize_literal_value_target(
+                            data_buffer,
+                            restriction,
+                            &literal,
+                        )?,
+                        other => match self.resolve(data_buffer, other.clone()) {
                             Some(resolved) => resolved,
                             None => {
-                            debug!(
-                                "Deferring restriction for term '{}': cannot resolve filler",
-                                data_buffer.term_index.get(restriction_term_id)?
-                            );
-                            return Ok(SerializationStatus::Deferred);
-                        }
+                                return Ok(SerializationStatus::Deferred);
+                            }
                         },
                     }
                 } else {
@@ -4460,7 +4453,7 @@ impl GraphDisplayDataSolutionSerializer {
 
         let object_term_id = if state.self_restriction {
             subject_term_id
-        } else if let Some(filler_id) = state.filler {
+        } else if let Some(filler_id) = state.filler.clone() {
             let filler_term = data_buffer.term_index.get(&filler_id)?;
             match &*filler_term {
                 Term::Literal(literal) => self.materialize_literal_value_target(
@@ -4470,11 +4463,9 @@ impl GraphDisplayDataSolutionSerializer {
                 )?,
                 _ => match self.resolve(data_buffer, filler_id)? {
                     Some(resolved) => resolved,
-                    None => self.materialize_named_value_target(
-                        data_buffer,
-                        &property_term_id,
-                        &filler_id,
-                    )?,
+                    None => {
+                        return Ok(SerializationStatus::Deferred);
+                    }
                 },
             }
         } else {
@@ -4546,98 +4537,46 @@ impl GraphDisplayDataSolutionSerializer {
         Ok(())
     }
 
-    fn materialize_named_value_target(
-        &self,
-        data_buffer: &mut SerializationDataBuffer,
-        property_term_id: &usize,
-        target_term_id: &usize,
-    ) -> Result<usize, SerializationError> {
-        let property_element_type = {
-            data_buffer
-                .edge_element_buffer
-                .read()?
-                .get(property_term_id)
-                .copied()
-        };
-        match property_element_type {
-            Some(ElementType::Owl(OwlType::Edge(OwlEdge::ObjectProperty)))
-            | Some(ElementType::Owl(OwlType::Edge(OwlEdge::ExternalProperty)))
-            | Some(ElementType::Owl(OwlType::Edge(OwlEdge::DeprecatedProperty)))
-            | Some(ElementType::Rdf(RdfType::Edge(RdfEdge::RdfProperty))) => {
-                let target_has_label = {
-                    data_buffer
-                        .label_buffer
-                        .read()?
-                        .contains_key(target_term_id)
-                };
-                if !target_has_label {
-                    let target_term = data_buffer.term_index.get(target_term_id)?;
-                    self.extract_label(data_buffer, None, &target_term, target_term_id)?;
-                }
-
-                let node_exists = {
-                    data_buffer
-                        .node_element_buffer
-                        .read()?
-                        .contains_key(target_term_id)
-                };
-                if !node_exists {
-                    let predicate_term_id =
-                        { data_buffer.term_index.insert(rdfs::RESOURCE.into())? };
-                    let resource_triple = self.create_triple_from_id(
-                        &data_buffer.term_index,
-                        *target_term_id,
-                        Some(predicate_term_id),
-                        None,
-                    )?;
-
-                    self.insert_node(
-                        data_buffer,
-                        resource_triple,
-                        ElementType::Rdfs(RdfsType::Node(RdfsNode::Resource)),
-                    )?;
-                }
-
-                Ok(*target_term_id)
-            }
-            _ => {
-                let triple = self.create_triple_from_id(
-                    &data_buffer.term_index,
-                    *target_term_id,
-                    Some(*property_term_id),
-                    None,
-                )?;
-                let display_triple = data_buffer.term_index.display_triple(&triple)?;
-                Err(SerializationErrorKind::SerializationFailedTriple(
-                    display_triple,
-                    format!(
-                        "Cannot materialize named value target '{}' for non-object restriction",
-                        data_buffer.term_index.get(target_term_id)?
-                    ),
-                )
-                .into())
-            }
-        }
-    }
-
     fn retry_restrictions(
         &self,
         data_buffer: &mut SerializationDataBuffer,
     ) -> Result<(), SerializationError> {
-        let restrictions = {
-            data_buffer
-                .restriction_buffer
-                .read()?
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>()
-        };
+        let mut pending = take(&mut data_buffer.dirty_restrictions);
 
-        for restriction in restrictions {
-            self.try_materialize_restriction(data_buffer, &restriction)?;
+        while !pending.is_empty() {
+            let current = pending;
+
+            for restriction in current {
+                self.try_materialize_restriction(data_buffer, &restriction)?;
+            }
+
+            if data_buffer.dirty_restrictions.is_empty() {
+                break;
+            }
+
+            pending = take(&mut data_buffer.dirty_restrictions);
         }
 
         Ok(())
+    }
+
+    fn update_restriction_state(
+        &self,
+        data_buffer: &mut SerializationDataBuffer,
+        restriction: &Term,
+        update: impl FnOnce(&mut super::RestrictionState),
+    ) -> Result<SerializationStatus, SerializationError> {
+        self.untrack_restriction_dependencies(data_buffer, restriction);
+        update(data_buffer.restriction_mut(restriction));
+        self.track_restriction_dependencies(data_buffer, restriction);
+        data_buffer.mark_restriction_dirty(restriction);
+        self.retry_restrictions(data_buffer)?;
+
+        if data_buffer.restriction_buffer.contains_key(restriction) {
+            Ok(SerializationStatus::Deferred)
+        } else {
+            Ok(SerializationStatus::Serialized)
+        }
     }
 
     fn remove_restriction_node(
