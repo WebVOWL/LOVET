@@ -4,6 +4,7 @@ use crate::errors::{ClientErrorKind, ErrorLogContext};
 use futures::StreamExt;
 use leptos::prelude::*;
 use leptos::server_fn::codec::{ByteStream, Streaming};
+use strum::IntoEnumIterator;
 #[cfg(feature = "server")]
 use vowlr_database::prelude::VOWLRStore;
 #[cfg(feature = "ssr")]
@@ -125,62 +126,39 @@ pub fn ExportMenu() -> impl IntoView {
         }
     });
 
+    let export_buttons = move || {
+        DataType::iter()
+            .filter(|dtype| {
+                !matches!(
+                    dtype,
+                    DataType::SPARQLCSV
+                        | DataType::SPARQLJSON
+                        | DataType::SPARQLTSV
+                        | DataType::SPARQLXML
+                        | DataType::UNKNOWN
+                )
+            })
+            .map(|dtype| {
+                view! {
+                    <ExportButton
+                        label=dtype.to_string()
+                        icon=icondata::BiExportRegular
+                        on_click=move || {
+                            download.dispatch((dtype, progress_message));
+                        }
+                    />
+                }
+                .into_any()
+            })
+            .collect_view()
+    };
+
     view! {
         <WorkbenchMenuItems title="Export Ontology">
             <div class="flex flex-wrap justify-center w-full">
-                // <ExportButton label="Json" icon=icondata::BiExportRegular />
                 // <ExportButton label="SVG" icon=icondata::BiExportRegular />
                 // <ExportButton label="TeX" icon=icondata::BiExportRegular />
-                // <ExportButton label="URL" icon=icondata::BiExportRegular />
-                <ExportButton
-                    label=DataType::OWL.to_string()
-                    icon=icondata::BiExportRegular
-                    on_click=move || {
-                        download.dispatch((DataType::OWL, progress_message));
-                    }
-                />
-                <ExportButton
-                    label=DataType::RDF.to_string()
-                    icon=icondata::BiExportRegular
-                    on_click=move || {
-                        download.dispatch((DataType::RDF, progress_message));
-                    }
-                />
-                <ExportButton
-                    label=DataType::TTL.to_string()
-                    icon=icondata::BiExportRegular
-                    on_click=move || {
-                        download.dispatch((DataType::TTL, progress_message));
-                    }
-                />
-                <ExportButton
-                    label=DataType::NTriples.to_string()
-                    icon=icondata::BiExportRegular
-                    on_click=move || {
-                        download.dispatch((DataType::NTriples, progress_message));
-                    }
-                />
-                <ExportButton
-                    label=DataType::NQuads.to_string()
-                    icon=icondata::BiExportRegular
-                    on_click=move || {
-                        download.dispatch((DataType::NQuads, progress_message));
-                    }
-                />
-                <ExportButton
-                    label=DataType::OFN.to_string()
-                    icon=icondata::BiExportRegular
-                    on_click=move || {
-                        download.dispatch((DataType::OFN, progress_message));
-                    }
-                />
-                <ExportButton
-                    label=DataType::OWX.to_string()
-                    icon=icondata::BiExportRegular
-                    on_click=move || {
-                        download.dispatch((DataType::OWX, progress_message));
-                    }
-                />
+                {export_buttons()}
             </div>
             {move || {
                 let msg = progress_message.get();
