@@ -167,8 +167,19 @@ impl Display for Edge {
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub enum RestrictionRenderMode {
     #[default]
-    ValuesFromEdge,
-    ExistingPropertyEdge,
+    Property,
+    ValuesFrom,
+    ExistingProperty,
+}
+
+impl RestrictionRenderMode {
+    pub const fn priority(self) -> u8 {
+        match self {
+            Self::Property => 0,
+            Self::ValuesFrom => 1,
+            Self::ExistingProperty => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]

@@ -864,7 +864,7 @@ impl GraphDisplayDataSolutionSerializer {
         new_state.self_restriction |= self_restriction;
         new_state.requires_filler |= requires_filler;
 
-        if new_state.render_mode == RestrictionRenderMode::ValuesFromEdge {
+        if render_mode.priority() > new_state.render_mode.priority() {
             new_state.render_mode = *render_mode;
         }
         Ok(())
@@ -1972,6 +1972,7 @@ impl GraphDisplayDataSolutionSerializer {
                             state.filler = triple.object_term_id;
                             state.cardinality = Some(("∀".to_string(), None));
                             state.requires_filler = true;
+                            state.render_mode = RestrictionRenderMode::ValuesFrom;
                         }
 
                         return self
@@ -2377,7 +2378,7 @@ impl GraphDisplayDataSolutionSerializer {
                                 .write()?;
                             state.filler = triple.object_term_id;
                             state.cardinality = Some(("value".to_string(), None));
-                            state.render_mode = RestrictionRenderMode::ExistingPropertyEdge;
+                            state.render_mode = RestrictionRenderMode::ExistingProperty;
                         }
 
                         return self
@@ -2644,6 +2645,7 @@ impl GraphDisplayDataSolutionSerializer {
                             state.filler = triple.object_term_id;
                             state.cardinality = Some(("∃".to_string(), None));
                             state.requires_filler = true;
+                            state.render_mode = RestrictionRenderMode::ValuesFrom;
                         }
 
                         return self
@@ -3821,19 +3823,21 @@ impl GraphDisplayDataSolutionSerializer {
         Ok(subject_term_id)
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn insert_restriction_edge(
         &self,
         data_buffer: &mut SerializationDataBuffer,
         subject_term_id: usize,
         property_term_id: usize,
         object_term_id: usize,
+        edge_type: ElementType,
         label: String,
         cardinality: Option<(String, Option<String>)>,
     ) -> Result<ArcEdge, SerializationError> {
         let edge = self.create_edge_from_id(
             &data_buffer.term_index,
             subject_term_id,
-            ElementType::Owl(OwlType::Edge(OwlEdge::ValuesFrom)),
+            edge_type,
             object_term_id,
             Some(property_term_id),
         )?;
@@ -3857,6 +3861,37 @@ impl GraphDisplayDataSolutionSerializer {
         }
 
         Ok(edge)
+    }
+
+    fn restriction_edge_type(
+        &self,
+        data_buffer: &SerializationDataBuffer,
+        property_term_id: &usize,
+        render_mode: RestrictionRenderMode,
+    ) -> Result<ElementType, SerializationError> {
+        if render_mode == RestrictionRenderMode::ValuesFrom {
+            return Ok(ElementType::Owl(OwlType::Edge(OwlEdge::ValuesFrom)));
+        }
+
+        match data_buffer
+            .edge_element_buffer
+            .read()?
+            .get(property_term_id)
+            .copied()
+        {
+            Some(
+                edge_type @ ElementType::Owl(OwlType::Edge(
+                    OwlEdge::ObjectProperty
+                    | OwlEdge::DatatypeProperty
+                    | OwlEdge::DeprecatedProperty
+                    | OwlEdge::ExternalProperty,
+                )),
+            )
+            | Some(edge_type @ ElementType::Rdf(RdfType::Edge(RdfEdge::RdfProperty))) => {
+                Ok(edge_type)
+            }
+            Some(_) | None => Ok(ElementType::Owl(OwlType::Edge(OwlEdge::ObjectProperty))),
+        }
     }
 
     fn is_numeric_cardinality(cardinality: &(String, Option<String>)) -> bool {
@@ -3914,6 +3949,7 @@ impl GraphDisplayDataSolutionSerializer {
             );
             return Ok(SerializationStatus::Deferred);
         };
+
         let has_restriction_payload =
             state.self_restriction || state.filler.is_some() || state.cardinality.is_some();
 
@@ -3932,12 +3968,13 @@ impl GraphDisplayDataSolutionSerializer {
             return Ok(SerializationStatus::Deferred);
         }
 
-        let subject_term_id = {
-            match self.resolve(data_buffer, raw_subject_term_id)? {
-                Some(term_id) => term_id,
-                None => self.follow_redirection(data_buffer, raw_subject_term_id)?,
-            }
+        let subject_term_id = match self.resolve(data_buffer, raw_subject_term_id)? {
+            Some(term_id) => term_id,
+            None => self.follow_redirection(data_buffer, raw_subject_term_id)?,
         };
+
+        let restriction_edge_type =
+            self.restriction_edge_type(data_buffer, &property_term_id, state.render_mode)?;
 
         let restriction_label = {
             let label_buffer = data_buffer.label_buffer.read()?;
@@ -3953,10 +3990,10 @@ impl GraphDisplayDataSolutionSerializer {
                         .get(&property_term_id)
                         .and_then(|edge| edge_label_buffer.get(edge).cloned())
                 })
-                .unwrap_or_else(|| OwlEdge::ValuesFrom.to_string())
+                .unwrap_or_else(|| restriction_edge_type.to_string())
         };
 
-        if state.render_mode == RestrictionRenderMode::ExistingPropertyEdge {
+        if state.render_mode == RestrictionRenderMode::ExistingProperty {
             let Some(existing_edge) = data_buffer
                 .property_edge_map
                 .read()?
@@ -4128,6 +4165,7 @@ impl GraphDisplayDataSolutionSerializer {
             subject_term_id,
             property_term_id,
             object_term_id,
+            restriction_edge_type,
             restriction_label,
             state.cardinality.clone(),
         )?;
