@@ -385,7 +385,12 @@ mod test {
         let mut out = vec![];
         let store = VOWLGrapherStore::default();
         store.insert_file(Path::new(&resource), false).await?;
-        while let Some(result) = store.serialize_stream(DataType::OWL, resource).await?.next().await {
+        while let Some(result) = store
+            .serialize_stream(DataType::OWL, resource)
+            .await?
+            .next()
+            .await
+        {
             out.extend(result?);
         }
 
@@ -398,7 +403,12 @@ mod test {
         let mut out = vec![];
         let store = VOWLGrapherStore::default();
         store.insert_file(Path::new(&resource), false).await?;
-        while let Some(result) = store.serialize_stream(DataType::OWL, resource).await?.next().await {
+        while let Some(result) = store
+            .serialize_stream(DataType::OWL, resource)
+            .await?
+            .next()
+            .await
+        {
             out.extend(result?);
         }
 
@@ -411,7 +421,12 @@ mod test {
         let mut out = vec![];
         let store = VOWLGrapherStore::default();
         store.insert_file(Path::new(&resource), false).await?;
-        while let Some(result) = store.serialize_stream(DataType::OWL, resource).await?.next().await {
+        while let Some(result) = store
+            .serialize_stream(DataType::OWL, resource)
+            .await?
+            .next()
+            .await
+        {
             out.extend(result?);
         }
         assert_ne!(out.len(), 0, "Expected non-zero quads for: {}", resource);
