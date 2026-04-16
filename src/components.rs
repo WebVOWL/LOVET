@@ -6,6 +6,7 @@ pub mod lists;
 pub mod menu;
 pub mod progress_bar;
 // pub mod theme;
+pub mod accordion;
 pub mod table;
 pub mod tooltip;
 pub mod user_input;
