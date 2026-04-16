@@ -1,4 +1,4 @@
-use crate::blocks::{right_side_bar::RightSidebar, workbench::NewWorkbench};
+use crate::blocks::{right_sidebar::RightSidebar, workbench::NewWorkbench};
 use leptos::prelude::*;
 use leptos_meta::Title;
 
