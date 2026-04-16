@@ -1407,6 +1407,27 @@ impl GraphDisplayDataSolutionSerializer {
             return Ok(SerializationStatus::Serialized);
         };
 
+        let left_is_blank = data_buffer.term_index.is_blank_node(&left_property_raw)?;
+        let right_is_blank = data_buffer.term_index.is_blank_node(&right_property_raw)?;
+
+        match (left_is_blank, right_is_blank) {
+            (true, false) => {
+                self.ensure_object_property_registration(data_buffer, right_property_raw)?;
+                self.merge_properties(data_buffer, &left_property_raw, &right_property_raw)?;
+                return Ok(SerializationStatus::Serialized);
+            }
+            (false, true) => {
+                self.ensure_object_property_registration(data_buffer, left_property_raw)?;
+                self.merge_properties(data_buffer, &right_property_raw, &left_property_raw)?;
+                return Ok(SerializationStatus::Serialized);
+            }
+            (true, true) => {
+                self.add_to_unknown_buffer(data_buffer, left_property_raw, triple)?;
+                return Ok(SerializationStatus::Deferred);
+            }
+            (false, false) => {}
+        }
+
         self.ensure_object_property_registration(data_buffer, left_property_raw)?;
         self.ensure_object_property_registration(data_buffer, right_property_raw)?;
 
@@ -4348,8 +4369,7 @@ impl GraphDisplayDataSolutionSerializer {
                         .contains_key(target_term_id)
                 };
                 if !node_exists {
-                    let predicate_term_id =
-                        { data_buffer.term_index.insert(rdfs::RESOURCE.into())? };
+                    let predicate_term_id = data_buffer.term_index.insert(rdfs::RESOURCE.into())?;
                     let resource_triple = self.create_triple_from_id(
                         &data_buffer.term_index,
                         *target_term_id,
@@ -4366,6 +4386,67 @@ impl GraphDisplayDataSolutionSerializer {
 
                 Ok(*target_term_id)
             }
+
+            Some(ElementType::Owl(OwlType::Edge(OwlEdge::DatatypeProperty))) => {
+                let target_has_label = {
+                    data_buffer
+                        .label_buffer
+                        .read()?
+                        .contains_key(target_term_id)
+                };
+                if !target_has_label {
+                    let target_term = data_buffer.term_index.get(target_term_id)?;
+                    self.extract_label(data_buffer, None, &target_term, target_term_id)?;
+                }
+
+                let node_exists = {
+                    data_buffer
+                        .node_element_buffer
+                        .read()?
+                        .contains_key(target_term_id)
+                };
+                if !node_exists {
+                    let target_term = data_buffer.term_index.get(target_term_id)?;
+
+                    let predicate_term_id =
+                        if let Some(element_type) = try_resolve_reserved(&target_term) {
+                            let predicate = match element_type {
+                                ElementType::Rdfs(RdfsType::Node(RdfsNode::Datatype)) => {
+                                    data_buffer.term_index.insert(rdfs::DATATYPE.into())?
+                                }
+                                _ => data_buffer.term_index.insert(rdfs::RESOURCE.into())?,
+                            };
+
+                            let datatype_triple = self.create_triple_from_id(
+                                &data_buffer.term_index,
+                                *target_term_id,
+                                Some(predicate),
+                                None,
+                            )?;
+
+                            self.insert_node(data_buffer, datatype_triple, element_type)?;
+                            return Ok(*target_term_id);
+                        } else {
+                            data_buffer.term_index.insert(rdfs::DATATYPE.into())?
+                        };
+
+                    let datatype_triple = self.create_triple_from_id(
+                        &data_buffer.term_index,
+                        *target_term_id,
+                        Some(predicate_term_id),
+                        None,
+                    )?;
+
+                    self.insert_node(
+                        data_buffer,
+                        datatype_triple,
+                        ElementType::Rdfs(RdfsType::Node(RdfsNode::Datatype)),
+                    )?;
+                }
+
+                Ok(*target_term_id)
+            }
+
             _ => {
                 let triple = self.create_triple_from_id(
                     &data_buffer.term_index,
