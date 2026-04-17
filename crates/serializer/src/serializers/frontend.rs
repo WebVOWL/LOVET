@@ -23,7 +23,7 @@ pub struct GraphDisplayDataSolutionSerializer;
 
 impl GraphDisplayDataSolutionSerializer {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     #[expect(unused, reason = "performance currently less than single-threaded")]

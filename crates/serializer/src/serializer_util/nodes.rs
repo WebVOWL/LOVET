@@ -46,7 +46,7 @@ pub fn insert_node(
     add_triple_to_element_buffer(
         &data_buffer.term_index,
         &mut data_buffer.node_element_buffer,
-        &triple,
+        triple,
         new_type,
     )?;
     check_unknown_buffer(data_buffer, &triple.subject_term_id)?;
