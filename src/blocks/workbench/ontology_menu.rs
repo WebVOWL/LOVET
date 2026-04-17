@@ -30,7 +30,10 @@ pub fn SelectStaticInput() -> impl IntoView {
         if let Some(stored) = selected_ontology.get() {
             active_graph_name.set(stored.path().to_string());
             match load_stored_ontology(stored).await {
-                Ok(()) => {
+                Ok(warning) => {
+                    if let Some(e) = warning {
+                        error_context.extend(e.records);
+                    }
                     load_graph(DEFAULT_QUERY.to_string(), true).await;
                 }
                 Err(e) => {

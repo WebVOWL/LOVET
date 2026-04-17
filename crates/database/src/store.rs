@@ -8,6 +8,7 @@ use rdf_fusion::model::{NamedNodeRef, Quad};
 use rdf_fusion::store::Store;
 use reqwest::{Client, Url};
 use std::collections::{HashSet, VecDeque};
+use std::env::var;
 use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
@@ -17,9 +18,28 @@ use vowlgrapher_parser::parser_util::{
     format_from_resource_type, parse_quads_to_format, parser_from_bytes, parser_from_path,
     path_type,
 };
-use vowlgrapher_util::prelude::{DataType, VOWLGrapherError};
+use vowlgrapher_util::prelude::{DataType, ErrorRecord, VOWLGrapherError};
 
 static GLOBAL_STORE: std::sync::OnceLock<Store> = std::sync::OnceLock::new();
+static RESOLVE_IMPORTS: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| parse_bool_env("VOWLGRAPHER_RESOLVE_IMPORTS", true));
+
+fn parse_bool_env(key: &str, default: bool) -> bool {
+    match var(key) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            other => {
+                warn!(
+                    "Failed to parse value '{}' for environment variable {}. Using default '{}'",
+                    other, key, default
+                );
+                default
+            }
+        },
+        Err(_) => default,
+    }
+}
 
 /// The graph database.
 pub struct VOWLGrapherStore {
@@ -117,14 +137,18 @@ impl VOWLGrapherStore {
     /// Inserts a file into the store.
     ///
     /// Files are automatically parsed.
-    pub async fn insert_file(&self, fs: &Path, lenient: bool) -> Result<(), VOWLGrapherStoreError> {
+    pub async fn insert_file(
+        &self,
+        fs: &Path,
+        lenient: bool,
+    ) -> Result<Option<VOWLGrapherError>, VOWLGrapherStoreError> {
         let graph_iri = self.get_graph_iri(&fs.to_string_lossy());
         let format = path_type(fs).ok_or_else(|| {
             VOWLGrapherStoreErrorKind::InvalidFileType("Unknown file extension".into())
         })?;
 
         let root_quads = parser_from_path(fs, format, lenient, &graph_iri)?;
-        let quads = self
+        let (quads, warnings) = self
             .flatten_import_closure(root_quads, &graph_iri, lenient, ImportBase::from_path(fs))
             .await?;
 
@@ -139,7 +163,8 @@ impl VOWLGrapherStore {
                 .unwrap_or(Duration::new(0, 0))
                 .as_secs_f32()
         );
-        Ok(())
+
+        Ok(warnings)
     }
 
     async fn load_file(
@@ -299,7 +324,7 @@ impl VOWLGrapherStore {
     pub async fn complete_upload(
         &mut self,
         filename: &str,
-    ) -> Result<DataType, VOWLGrapherStoreError> {
+    ) -> Result<(DataType, Option<VOWLGrapherError>), VOWLGrapherStoreError> {
         let graph_iri = self.get_graph_iri(filename);
         let path = if let Some(file) = &mut self.upload_handle {
             std::io::Write::flush(file)?;
@@ -312,7 +337,7 @@ impl VOWLGrapherStore {
         };
 
         let (root_quads, loaded_format) = self.load_file(&path, false, &graph_iri).await?;
-        let quads = self
+        let (quads, warnings) = self
             .flatten_import_closure(
                 root_quads,
                 &graph_iri,
@@ -335,7 +360,7 @@ impl VOWLGrapherStore {
         );
 
         self.upload_handle = None;
-        Ok(loaded_format)
+        Ok((loaded_format, warnings))
     }
 
     async fn flatten_import_closure(
@@ -344,37 +369,84 @@ impl VOWLGrapherStore {
         graph_iri: &str,
         lenient: bool,
         root_base: ImportBase,
-    ) -> Result<Vec<Quad>, VOWLGrapherStoreError> {
+    ) -> Result<(Vec<Quad>, Option<VOWLGrapherError>), VOWLGrapherStoreError> {
+        if !*RESOLVE_IMPORTS {
+            info!("Import resolution disabled via VOWLGRAPHER_RESOLVE_IMPORTS");
+            return Ok((root_quads, None));
+        }
+
         let client = Client::new();
         let mut all_quads = root_quads.clone();
         let mut visited = HashSet::<String>::new();
         let mut queue = VecDeque::<(String, ImportBase)>::new();
+        let mut warnings = Vec::<ErrorRecord>::new();
 
         for import in extract_import_iris(&root_quads).await? {
             queue.push_back((import, root_base.clone()));
         }
 
         while let Some((raw_import, parent_base)) = queue.pop_front() {
-            let resolved = parent_base.resolve(&raw_import)?;
+            let resolved = match parent_base.resolve(&raw_import) {
+                Ok(url) => url,
+                Err(err) => {
+                    warn!("Skipping unresolved import '{}': {}", raw_import, err);
+                    warnings.push(err.into());
+                    continue;
+                }
+            };
             let resolved_key = resolved.to_string();
 
             if !visited.insert(resolved_key.clone()) {
                 continue;
             }
 
-            let (bytes, hinted_format, next_base) = fetch_import_source(&client, &resolved).await?;
-            let (quads, _) = self
-                .load_bytes_with_fallback(&bytes, hinted_format, lenient, graph_iri)
-                .await?;
+            let (bytes, hinted_format, next_base) =
+                match fetch_import_source(&client, &resolved).await {
+                    Ok(source) => source,
+                    Err(err) => {
+                        warn!("Skipping failed import fetch '{}': {}", resolved, err);
+                        warnings.push(err.into());
+                        continue;
+                    }
+                };
 
-            for nested in extract_import_iris(&quads).await? {
-                queue.push_back((nested, next_base.clone()));
+            let (quads, _) = match self
+                .load_bytes_with_fallback(&bytes, hinted_format, lenient, graph_iri)
+                .await
+            {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    warn!("Skipping unparsable import '{}': {}", resolved, err);
+                    warnings.push(err.into());
+                    continue;
+                }
+            };
+
+            match extract_import_iris(&quads).await {
+                Ok(nested_imports) => {
+                    for nested in nested_imports {
+                        queue.push_back((nested, next_base.clone()));
+                    }
+                }
+                Err(err) => {
+                    warn!(
+                        "Failed to inspect nested imports for '{}': {}",
+                        resolved, err
+                    );
+                    warnings.push(err.into());
+                }
             }
 
             all_quads.extend(quads);
         }
 
-        Ok(all_quads)
+        let warnings = if warnings.is_empty() {
+            None
+        } else {
+            Some(warnings.into())
+        };
+
+        Ok((all_quads, warnings))
     }
 }
 
