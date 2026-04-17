@@ -144,18 +144,26 @@ pub async fn handle_local(
         }
     }
 
-    let parsed_dtype = session.complete_upload(&name).await?;
-    let warning = if parsed_dtype != dtype
+    let (parsed_dtype, import_warning) = session.complete_upload(&name).await?;
+    let extension_warning = if parsed_dtype != dtype
         && parsed_dtype != DataType::UNKNOWN
         && dtype != DataType::UNKNOWN
     {
-        Some(<VOWLGrapherStoreError as Into<VOWLGrapherError>>::into(VOWLGrapherStoreErrorKind::IncorrectFileExtension(format!(
+        Some(<VOWLGrapherStoreError as Into<VOWLGrapherError>>::into(
+        VOWLGrapherStoreErrorKind::IncorrectFileExtension(format!(
             "The uploaded file had an incorrect file extension. It was parsed as {parsed_dtype} instead of {dtype}"
-        )).into()))
+        ))
+        .into(),
+    ))
     } else {
         None
     };
-    Ok((parsed_dtype, count, warning))
+
+    Ok((
+        parsed_dtype,
+        count,
+        merge_warnings(import_warning, extension_warning),
+    ))
 }
 
 /// Remote reads url and calls for the datatype label and returns (label, data content)
@@ -205,18 +213,26 @@ pub async fn handle_remote(
         progress::add_chunk(&progress_key, chunk.len()).await;
     }
     progress::remove(&progress_key);
-    let parsed_dtype = session.complete_upload(&url).await?;
-    let warning = if parsed_dtype != dtype
+    let (parsed_dtype, import_warning) = session.complete_upload(&url).await?;
+    let extension_warning = if parsed_dtype != dtype
         && parsed_dtype != DataType::UNKNOWN
         && dtype != DataType::UNKNOWN
     {
-        Some(<VOWLGrapherStoreError as Into<VOWLGrapherError>>::into(VOWLGrapherStoreErrorKind::IncorrectFileExtension(format!(
+        Some(<VOWLGrapherStoreError as Into<VOWLGrapherError>>::into(
+        VOWLGrapherStoreErrorKind::IncorrectFileExtension(format!(
             "The uploaded file had an incorrect file extension. It was parsed as {parsed_dtype} instead of {dtype}"
-        )).into()))
+        ))
+        .into(),
+    ))
     } else {
         None
     };
-    Ok((parsed_dtype, total, warning))
+
+    Ok((
+        parsed_dtype,
+        total,
+        merge_warnings(import_warning, extension_warning),
+    ))
 }
 
 /// Sparql reads (endpoint + query) and calls for the datatype label and returns (label, data content)
@@ -497,5 +513,19 @@ impl FileUpload {
 impl Default for FileUpload {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn merge_warnings(
+    left: Option<VOWLGrapherError>,
+    right: Option<VOWLGrapherError>,
+) -> Option<VOWLGrapherError> {
+    match (left, right) {
+        (None, None) => None,
+        (Some(err), None) | (None, Some(err)) => Some(err),
+        (Some(mut left), Some(right)) => {
+            left.records.extend(right.records);
+            Some(left)
+        }
     }
 }

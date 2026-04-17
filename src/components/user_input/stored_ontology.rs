@@ -101,10 +101,12 @@ impl TryFrom<String> for StoredOntology {
 }
 
 #[server(input = Rkyv, output = Rkyv)]
-pub async fn load_stored_ontology(ontology: StoredOntology) -> Result<(), VOWLGrapherError> {
+pub async fn load_stored_ontology(
+    ontology: StoredOntology,
+) -> Result<Option<VOWLGrapherError>, VOWLGrapherError> {
     let path = Path::new(ontology.path());
     let store = VOWLGrapherStore::new_for_user(manage_user_id().await?);
 
-    store.insert_file(path, false).await?;
-    Ok(())
+    let warnings = store.insert_file(path, false).await?;
+    Ok(warnings)
 }
