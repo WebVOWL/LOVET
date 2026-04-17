@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use leptos::server_fn::ServerFnError;
 use leptos::server_fn::codec::{MultipartData, MultipartFormData, StreamingText, TextStream};
 use leptos::task::spawn_local;
-use log::{debug, info, trace};
+use log::info;
 #[cfg(feature = "server")]
 use reqwest::Client;
 use std::cell::RefCell;
