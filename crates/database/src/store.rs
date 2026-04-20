@@ -108,7 +108,6 @@ impl VOWLRStore {
             )
             .into()),
             QueryResults::Graph(mut _query_triple_stream) => {
-                // TODO: Implement to support user-defined SPARQL queries
                 let temp_id = uuid::Uuid::new_v4().to_string();
                 let temp_graph_iri = format!("urn:vowlr:temp:{}", temp_id);
                 debug!("Creating temporary view graph: {}", temp_graph_iri);
@@ -151,11 +150,6 @@ impl VOWLRStore {
 
                 let (display_data, errors) = Box::pin(self.query(default_query_logic, Some(temp_graph_iri))).await?;
 
-
-                // Err(SerializationErrorKind::UnsupportedQueryType(
-                //     "Query stream is not a SELECT query".to_string(),
-                // )
-                // .into())
                 Ok((display_data, errors))
             }
         }
