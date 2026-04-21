@@ -51,7 +51,8 @@ pub struct GraphMetadataBuffer {
     /// The usage of this annotation property on entities other than ontologies is [discouraged](https://www.w3.org/TR/owl-syntax/#Ontology_Annotations).
     /// As such, we notify the client if this is violated.
     pub backward_compatible_with: Arc<RwLock<Option<usize>>>,
-    pub ontology_property: Arc<RwLock<String>>,
+    /// Maps from `owl:annotatedSource` to a hashmap, mapping `owl:annotatedProperty` to `owl:annotatedTarget`.
+    pub annotations: Arc<RwLock<HashMap<usize, HashMap<usize, usize>>>>,
 }
 
 impl GraphMetadataBuffer {
