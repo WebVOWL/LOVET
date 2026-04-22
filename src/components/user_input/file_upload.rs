@@ -13,15 +13,19 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 #[cfg(feature = "server")]
-use vowlr_database::prelude::VOWLRStore;
+use vowlgrapher_database::prelude::VOWLGrapherStore;
+#[cfg(feature = "server")]
+use vowlgrapher_parser::errors::VOWLGrapherStoreError;
+#[cfg(feature = "server")]
+use vowlgrapher_parser::errors::VOWLGrapherStoreErrorKind;
 #[cfg(feature = "ssr")]
-use vowlr_util::prelude::manage_user_id;
-use vowlr_util::prelude::{DataType, VOWLRError};
+use vowlgrapher_util::prelude::manage_user_id;
+use vowlgrapher_util::prelude::{DataType, VOWLGrapherError};
 use web_sys::{FileList, FormData};
 
 use crate::errors::ClientErrorKind;
-
-const MAX_FILE_SIZE_BYTES: usize = 50 * 1024 * 1024;
+#[cfg(feature = "server")]
+use vowlgrapher_util::prelude::VOWLGRAPHER_ENVIRONMENT;
 
 #[cfg(feature = "ssr")]
 mod progress {
@@ -90,19 +94,22 @@ pub async fn ontology_progress(filename: String) -> Result<TextStream, ServerFnE
 #[server(
     input = MultipartFormData,
 )]
-pub async fn handle_local(data: MultipartData) -> Result<(DataType, usize), VOWLRError> {
+pub async fn handle_local(
+    data: MultipartData,
+) -> Result<(DataType, usize, Option<VOWLGrapherError>), VOWLGrapherError> {
     let user_id = manage_user_id().await?;
     trace!("User {user_id} is uploading a local file");
 
-    let mut session = VOWLRStore::new_for_user(user_id);
+    let mut session = VOWLGrapherStore::new_for_user(user_id);
 
     let mut data = data
         .into_inner()
         .ok_or_else(|| ServerFnError::new("data must be server-side"))?;
     let mut count = 0;
     let mut dtype = DataType::UNKNOWN;
+    let mut name = String::new();
     while let Ok(Some(mut field)) = data.next_field().await {
-        let name = field.file_name().unwrap_or_default().to_string();
+        name = field.file_name().unwrap_or_default().to_string();
 
         if name.is_empty() {
             return Err(ServerFnError::new("Received empty file string").into());
@@ -112,7 +119,7 @@ pub async fn handle_local(data: MultipartData) -> Result<(DataType, usize), VOWL
         progress::reset(&name);
         debug!("Resetting progress");
 
-        session.start_upload(&name).await?;
+        session.start_upload(&name)?;
 
         dtype = Path::new(&name).into();
 
@@ -120,30 +127,50 @@ pub async fn handle_local(data: MultipartData) -> Result<(DataType, usize), VOWL
             let len = chunk.len();
             count += len;
 
-            if count > MAX_FILE_SIZE_BYTES {
+            if count as u64 > VOWLGRAPHER_ENVIRONMENT.max_input_size_bytes.0 {
                 return Err(ServerFnError::ServerError(format!(
-                    "File {name} exceeds the maximum allowed size of {}MB.",
-                    MAX_FILE_SIZE_BYTES / 1024 / 1024
+                    "File '{name}' exceeds the maximum allowed size of {}",
+                    VOWLGRAPHER_ENVIRONMENT.max_input_size_bytes.display().si()
                 ))
                 .into());
             }
 
-            session.upload_chunk(&chunk).await?;
+            session.upload_chunk(&chunk)?;
             progress::add_chunk(&name, len).await;
         }
 
         if !name.is_empty() {
             progress::remove(&name);
         }
-        session.complete_upload(&name).await?;
     }
 
-    Ok((dtype, count))
+    let (parsed_dtype, import_warning) = session.complete_upload(&name).await?;
+    let extension_warning = if parsed_dtype != dtype
+        && parsed_dtype != DataType::UNKNOWN
+        && dtype != DataType::UNKNOWN
+    {
+        Some(<VOWLGrapherStoreError as Into<VOWLGrapherError>>::into(
+        VOWLGrapherStoreErrorKind::IncorrectFileExtension(format!(
+            "The uploaded file had an incorrect file extension. It was parsed as {parsed_dtype} instead of {dtype}"
+        ))
+        .into(),
+    ))
+    } else {
+        None
+    };
+
+    Ok((
+        parsed_dtype,
+        count,
+        merge_warnings(import_warning, extension_warning),
+    ))
 }
 
 /// Remote reads url and calls for the datatype label and returns (label, data content)
 #[server]
-pub async fn handle_remote(url: String) -> Result<(DataType, usize), VOWLRError> {
+pub async fn handle_remote(
+    url: String,
+) -> Result<(DataType, usize, Option<VOWLGrapherError>), VOWLGrapherError> {
     let user_id = manage_user_id().await?;
     trace!("User {user_id} is uploading a remote file");
 
@@ -158,20 +185,20 @@ pub async fn handle_remote(url: String) -> Result<(DataType, usize), VOWLRError>
 
     if let Some(content_length) = resp.content_length() {
         let size = usize::try_from(content_length).unwrap_or(usize::MAX);
-        if size > MAX_FILE_SIZE_BYTES {
+        if size as u64 > VOWLGRAPHER_ENVIRONMENT.max_input_size_bytes.0 {
             return Err(ServerFnError::ServerError(format!(
-                "Remote file exceeds the maximum allowed size of {}MB.",
-                MAX_FILE_SIZE_BYTES / 1024 / 1024
+                "Remote file exceeds the maximum allowed size of {}",
+                VOWLGRAPHER_ENVIRONMENT.max_input_size_bytes.display().si()
             ))
             .into());
         }
     }
 
-    let mut session = VOWLRStore::new_for_user(user_id);
+    let mut session = VOWLGrapherStore::new_for_user(user_id);
 
     let progress_key = url.clone();
     progress::reset(&progress_key);
-    session.start_upload(&url).await?;
+    session.start_upload(&url)?;
 
     let mut total = 0;
     let dtype = Path::new(&url).into();
@@ -182,13 +209,30 @@ pub async fn handle_remote(url: String) -> Result<(DataType, usize), VOWLRError>
             chunk_result.map_err(|e| ServerFnError::new(format!("Error reading chunk: {e}")))?;
 
         total += chunk.len();
-        session.upload_chunk(&chunk).await?;
+        session.upload_chunk(&chunk)?;
         progress::add_chunk(&progress_key, chunk.len()).await;
     }
-
     progress::remove(&progress_key);
-    session.complete_upload(&url).await?;
-    Ok((dtype, total))
+    let (parsed_dtype, import_warning) = session.complete_upload(&url).await?;
+    let extension_warning = if parsed_dtype != dtype
+        && parsed_dtype != DataType::UNKNOWN
+        && dtype != DataType::UNKNOWN
+    {
+        Some(<VOWLGrapherStoreError as Into<VOWLGrapherError>>::into(
+        VOWLGrapherStoreErrorKind::IncorrectFileExtension(format!(
+            "The uploaded file had an incorrect file extension. It was parsed as {parsed_dtype} instead of {dtype}"
+        ))
+        .into(),
+    ))
+    } else {
+        None
+    };
+
+    Ok((
+        parsed_dtype,
+        total,
+        merge_warnings(import_warning, extension_warning),
+    ))
 }
 
 /// Sparql reads (endpoint + query) and calls for the datatype label and returns (label, data content)
@@ -197,13 +241,13 @@ pub async fn handle_sparql(
     endpoint: String,
     query: String,
     format: Option<String>,
-) -> Result<(DataType, usize), VOWLRError> {
+) -> Result<(DataType, usize, Option<VOWLGrapherError>), VOWLGrapherError> {
     let user_id = manage_user_id().await?;
     trace!("User {user_id} is quering SPARQL");
 
     let client = Client::new();
 
-    let mut session = VOWLRStore::new_for_user(user_id);
+    let mut session = VOWLGrapherStore::new_for_user(user_id);
 
     let accept_type = match format.as_deref() {
         Some("xml") => DataType::SPARQLXML.mime_type(),
@@ -223,7 +267,7 @@ pub async fn handle_sparql(
 
     let progress_key = format!("sparql-{endpoint}");
     progress::reset(&progress_key);
-    session.start_upload(&progress_key).await?;
+    session.start_upload(&progress_key)?;
 
     let mut total = 0;
     let mut stream = resp.bytes_stream();
@@ -232,7 +276,7 @@ pub async fn handle_sparql(
             chunk_result.map_err(|e| ServerFnError::new(format!("Error reading chunk: {e}")))?;
 
         total += chunk.len();
-        session.upload_chunk(&chunk).await?;
+        session.upload_chunk(&chunk)?;
         progress::add_chunk(&progress_key, chunk.len()).await;
     }
 
@@ -244,7 +288,7 @@ pub async fn handle_sparql(
     } else {
         DataType::SPARQLJSON
     };
-    Ok((dtype, total))
+    Ok((dtype, total, None))
 }
 
 pub struct UploadProgress {
@@ -347,7 +391,7 @@ impl UploadProgress {
         clippy::missing_errors_doc,
         reason = "why does clippy only complain about this method? (TODO: Add docs to all functions)"
     )]
-    pub fn upload_files<F>(&self, file_list: &FileList, dispatch: F) -> Result<(), VOWLRError>
+    pub fn upload_files<F>(&self, file_list: &FileList, dispatch: F) -> Result<(), VOWLGrapherError>
     where
         F: FnOnce(FormData) + 'static,
     {
@@ -407,11 +451,17 @@ impl Default for UploadProgress {
 #[derive(Clone)]
 pub struct FileUpload {
     pub mode: RwSignal<String>,
-    pub local_action: Action<FormData, Result<(DataType, usize), VOWLRError>>,
-    pub remote_action: Action<String, Result<(DataType, usize), VOWLRError>>,
     #[expect(clippy::type_complexity)]
-    pub sparql_action:
-        Action<(String, String, Option<String>), Result<(DataType, usize), VOWLRError>>,
+    pub local_action:
+        Action<FormData, Result<(DataType, usize, Option<VOWLGrapherError>), VOWLGrapherError>>,
+    #[expect(clippy::type_complexity)]
+    pub remote_action:
+        Action<String, Result<(DataType, usize, Option<VOWLGrapherError>), VOWLGrapherError>>,
+    #[expect(clippy::type_complexity)]
+    pub sparql_action: Action<
+        (String, String, Option<String>),
+        Result<(DataType, usize, Option<VOWLGrapherError>), VOWLGrapherError>,
+    >,
     pub tracker: Rc<UploadProgress>,
 }
 
@@ -419,18 +469,19 @@ impl FileUpload {
     pub fn new() -> Self {
         let mode = RwSignal::new("local".to_string());
 
-        let local_action =
-            Action::<FormData, Result<(DataType, usize), VOWLRError>>::new_local(|data| {
-                handle_local(data.clone().into())
-            });
+        let local_action = Action::<
+            FormData,
+            Result<(DataType, usize, Option<VOWLGrapherError>), VOWLGrapherError>,
+        >::new_local(|data| handle_local(data.clone().into()));
 
-        let remote_action = Action::<String, Result<(DataType, usize), VOWLRError>>::new(|url| {
-            handle_remote(url.clone())
-        });
+        let remote_action = Action::<
+            String,
+            Result<(DataType, usize, Option<VOWLGrapherError>), VOWLGrapherError>,
+        >::new(|url| handle_remote(url.clone()));
 
         let sparql_action = Action::<
             (String, String, Option<String>),
-            Result<(DataType, usize), VOWLRError>,
+            Result<(DataType, usize, Option<VOWLGrapherError>), VOWLGrapherError>,
         >::new(|(endpoint, query, format)| {
             handle_sparql(endpoint.clone(), query.clone(), format.clone())
         });
@@ -446,7 +497,10 @@ impl FileUpload {
         }
     }
 
-    pub fn get_result(&self) -> Option<Result<(DataType, usize), VOWLRError>> {
+    #[expect(clippy::type_complexity)]
+    pub fn get_result(
+        &self,
+    ) -> Option<Result<(DataType, usize, Option<VOWLGrapherError>), VOWLGrapherError>> {
         match self.mode.get().as_str() {
             "local" => self.local_action.value().get(),
             "remote" => self.remote_action.value().get(),
@@ -459,5 +513,19 @@ impl FileUpload {
 impl Default for FileUpload {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn merge_warnings(
+    left: Option<VOWLGrapherError>,
+    right: Option<VOWLGrapherError>,
+) -> Option<VOWLGrapherError> {
+    match (left, right) {
+        (None, None) => None,
+        (Some(err), None) | (None, Some(err)) => Some(err),
+        (Some(mut left), Some(right)) => {
+            left.records.extend(right.records);
+            Some(left)
+        }
     }
 }

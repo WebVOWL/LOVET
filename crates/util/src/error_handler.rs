@@ -64,15 +64,17 @@ pub enum ErrorType {
     Serializer,
     /// Errors related to parsing data (e.g. a `.owl` file).
     Parser,
-    /// Errors related to the graph renderer (i.e. WasmGrapher)
+    /// Errors related to the graph renderer (i.e. `WasmGrapher`)
     Renderer,
     #[strum(serialize = "GUI")]
     /// Errors related to the frontend GUI.
     Gui,
-    /// Server errors without a type.
+    /// Server errors with unknown type.
     InternalServerError,
-    /// Client errors without a type.
+    /// Client errors with unknown type.
     ClientError,
+    /// Errors with unknown origin and type.
+    UnknownError,
 }
 
 #[derive(
@@ -108,7 +110,7 @@ pub struct ErrorRecord {
     #[cfg(debug_assertions)]
     /// The location in the source code where the error originated.
     ///
-    /// Only enabled with [cfg.debug_assertions]
+    /// Only enabled with [`cfg.debug_assertions`]
     pub location: String,
 }
 
@@ -118,7 +120,7 @@ impl ErrorRecord {
     /// - `severity` is the error's severity.
     /// - `error_type` is the type of error.
     /// - `message` is the error message.
-    /// -  If #[cfg(debug_assertions)] is enabled, then `location`
+    /// -  If #[`cfg(debug_assertions)`] is enabled, then `location`
     ///    is the location of the error in the source code.
     pub fn new(
         timestamp: String,
@@ -133,13 +135,13 @@ impl ErrorRecord {
             error_type,
             message,
             #[cfg(debug_assertions)]
-            location: location.unwrap_or("Unknown".to_string()),
+            location: location.unwrap_or_else(|| "Unknown".to_string()),
         }
     }
 
     #[cfg(feature = "server")]
     /// Only available on the server.
-    pub fn format_records(records: &[ErrorRecord]) -> String {
+    pub fn format_records(records: &[Self]) -> String {
         let table_config = Settings::default().with(Style::modern_rounded());
         Table::new(records).with(table_config).to_string()
     }
@@ -187,7 +189,7 @@ impl TableHTML for ErrorRecord {
                 <td class=td_css>{self.message.clone()}</td>
                 {
                     #[cfg(debug_assertions)]
-                    view! { <td class=td_css>{self.location.to_string()}</td> }
+                    view! { <td class=td_css>{self.location.clone()}</td> }
                 }
             </tr>
         }
@@ -202,18 +204,18 @@ impl From<ServerFnError> for ErrorRecord {
                 ErrorType::InternalServerError,
                 "deprecated WrappedServerError".to_string(),
             ),
-            ServerFnError::Registration(e) => (ErrorType::InternalServerError, e),
-            ServerFnError::Request(e) => (ErrorType::ClientError, e),
-            ServerFnError::Response(e) => (ErrorType::InternalServerError, e),
-            ServerFnError::ServerError(e) => (ErrorType::InternalServerError, e),
-            ServerFnError::MiddlewareError(e) => (ErrorType::InternalServerError, e),
-            ServerFnError::Deserialization(e) => (ErrorType::ClientError, e),
-            ServerFnError::Serialization(e) => (ErrorType::ClientError, e),
-            ServerFnError::Args(e) => (ErrorType::InternalServerError, e),
-            ServerFnError::MissingArg(e) => (ErrorType::InternalServerError, e),
+            ServerFnError::Registration(e)
+            | ServerFnError::Response(e)
+            | ServerFnError::ServerError(e)
+            | ServerFnError::MiddlewareError(e)
+            | ServerFnError::Args(e)
+            | ServerFnError::MissingArg(e) => (ErrorType::InternalServerError, e),
+            ServerFnError::Request(e)
+            | ServerFnError::Deserialization(e)
+            | ServerFnError::Serialization(e) => (ErrorType::ClientError, e),
         };
 
-        ErrorRecord::new(
+        Self::new(
             get_timestamp(),
             ErrorSeverity::Unset,
             error_type,
@@ -236,7 +238,7 @@ impl std::fmt::Display for ErrorRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let table_config = Settings::default().with(Style::modern_rounded());
         let table = Table::new([self]).with(table_config).to_string();
-        write!(f, "{}", table)
+        write!(f, "{table}")
     }
 }
 
@@ -272,22 +274,26 @@ impl std::fmt::Display for ErrorRecord {
     serde::Serialize,
     serde::Deserialize,
 )]
-/// The struct used by VOWL-R when things go south.
+/// The struct used by `VOWLGrapher` when things go south.
 ///
 /// # Note
-/// Every error type in use should implement [`From<T> for VOWLRError`].
-pub struct VOWLRError {
+/// Every error type in use should implement [`From<T> for VOWLGrapherError`].
+pub struct VOWLGrapherError {
     /// Contains all error instances captured by a particular user request.
     pub records: Vec<ErrorRecord>,
 }
 
-impl FromServerFnError for VOWLRError {
+impl FromServerFnError for VOWLGrapherError {
     type Encoder = RkyvEncoding;
 
     fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
         value.into()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "if the error fails to be instantiated, all is lost"
+    )]
     fn ser(&self) -> server_fn::Bytes {
         Self::Encoder::encode(self).unwrap_or_else(|e| {
             Self::Encoder::encode(&Self::from_server_fn_error(
@@ -303,41 +309,41 @@ impl FromServerFnError for VOWLRError {
     }
 }
 
-impl From<ServerFnError> for VOWLRError {
+impl From<ServerFnError> for VOWLGrapherError {
     fn from(value: ServerFnError) -> Self {
-        <ErrorRecord as Into<VOWLRError>>::into(value.into())
+        <ErrorRecord as Into<Self>>::into(value.into())
     }
 }
 
-impl From<ServerFnErrorErr> for VOWLRError {
+impl From<ServerFnErrorErr> for VOWLGrapherError {
     fn from(value: ServerFnErrorErr) -> Self {
-        <ErrorRecord as Into<VOWLRError>>::into(value.into())
+        <ErrorRecord as Into<Self>>::into(value.into())
     }
 }
 
-impl From<ErrorRecord> for VOWLRError {
+impl From<ErrorRecord> for VOWLGrapherError {
     fn from(value: ErrorRecord) -> Self {
-        VOWLRError {
+        Self {
             records: vec![value],
         }
     }
 }
 
-impl From<Vec<ErrorRecord>> for VOWLRError {
+impl From<Vec<ErrorRecord>> for VOWLGrapherError {
     fn from(value: Vec<ErrorRecord>) -> Self {
-        VOWLRError { records: value }
+        Self { records: value }
     }
 }
 
 #[cfg(feature = "server")]
-impl std::fmt::Display for VOWLRError {
+impl std::fmt::Display for VOWLGrapherError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", ErrorRecord::format_records(&self.records))
     }
 }
 
 #[cfg(not(feature = "server"))]
-impl std::fmt::Display for VOWLRError {
+impl std::fmt::Display for VOWLGrapherError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         #[cfg(debug_assertions)]
         {
@@ -350,8 +356,8 @@ impl std::fmt::Display for VOWLRError {
         }
 
         let mut buffer = String::new();
-        for record in self.records.iter() {
-            writeln!(buffer, "{}", record)?;
+        for record in &self.records {
+            writeln!(buffer, "{record}")?;
         }
         write!(f, "{buffer}")
     }

@@ -1,5 +1,4 @@
 use super::WorkbenchMenuItems;
-use crate::components::tooltip::{ToolTip, ToolTipPosition};
 use crate::components::user_input::range_select::Slider;
 use crate::errors::{ClientErrorKind, ErrorLogContext};
 use grapher::prelude::*;
@@ -43,31 +42,26 @@ pub fn SimulatorSettings() -> impl IntoView {
         <fieldset>
             <legend>"Graph Simulation"</legend>
             <div class="flex flex-col content-around m-4 size-fit">
-                <ToolTip<f64> content=repel_force position=ToolTipPosition::Top>
-                    <Slider
-                        label="Node Distance"
-                        value=repel_force
-                        min=10e6.to_string()
-                        max=10e8.to_string()
-                        step=10e3.to_string()
-                    ></Slider>
-                </ToolTip<f64>>
+                <Slider
+                    label="Node Distance"
+                    value=repel_force
+                    min=(-10e8).to_string()
+                    max=(-10e6).to_string()
+                    step=(-10e3).to_string()
+                ></Slider>
 
-                <ToolTip<f64> content=spring_stiffness position=ToolTipPosition::Top>
-                    <Slider
-                        label="Edge Stiffness"
-                        value=spring_stiffness
-                        min="100.0"
-                        max="600.0"
-                        step="100.0"
-                    ></Slider>
-                </ToolTip<f64>>
-
+                <Slider
+                    label="Edge Stiffness"
+                    value=spring_stiffness
+                    min="50.0"
+                    max="200.0"
+                    step="10.0"
+                ></Slider>
                 <Slider
                     label="Edge Length"
                     value=spring_neutral_length
                     min="20.0"
-                    max="120.0"
+                    max="200.0"
                     step="10.0"
                 ></Slider>
 

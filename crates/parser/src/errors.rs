@@ -8,99 +8,132 @@ use std::{
 use horned_owl::error::HornedError;
 
 use rdf_fusion::{
-    error::LoaderError,
+    error::{LoaderError, SerializerError},
     execution::sparql::error::QueryEvaluationError,
     model::{IriParseError, StorageError},
 };
 use tokio::task::JoinError;
-use vowlr_util::prelude::{ErrorRecord, ErrorSeverity, ErrorType, VOWLRError, get_timestamp};
+use vowlgrapher_util::prelude::{
+    ErrorRecord, ErrorSeverity, ErrorType, VOWLGrapherError, get_timestamp,
+};
 
 /// The type of errors thrown by the database.
 #[derive(Debug)]
-pub enum VOWLRStoreErrorKind {
+pub enum VOWLGrapherStoreErrorKind {
     /// The file type is not supported by the server.
     ///
     /// Example: server only supports `.owl` and is given `.png`
     InvalidFileType(String),
+    /// The file extension does not match the file type.
+    ///
+    /// Example: the file is parsed as `.owl` but has a `.ttl` extension.
+    IncorrectFileExtension(String),
+    /// Error on file extension for imported ontology
+    ImportResolutionError(String),
+    /// Error on fetch of imported ontology
+    RemoteFetchError(String),
     /// An error raised by Horned-OWL during parsing (of OWL files).
-    HornedError(HornedError),
+    HornedError(Box<HornedError>),
     /// Generic IO error.
-    IOError(io::Error),
+    IOError(Box<io::Error>),
     /// An error raised while trying to parse an invalid IRI.
-    IriParseError(IriParseError),
+    IriParseError(Box<IriParseError>),
     /// An error raised while loading a file into a Store (database).
-    LoaderError(LoaderError),
+    LoaderError(Box<LoaderError>),
     /// A SPARQL evaluation error.
-    QueryEvaluationError(QueryEvaluationError),
+    QueryEvaluationError(Box<QueryEvaluationError>),
     /// A Tokio task failed to execute to completion.
-    JoinError(JoinError),
+    JoinError(Box<JoinError>),
     /// An error related to (database) storage operations (reads, writes...).
-    StorageError(StorageError),
+    StorageError(Box<StorageError>),
+    /// An error raised if the query type is not supported.
+    ///
+    /// Some types are: SELECT, ASK, CONSTRUCT.
+    UnsupportedQueryType(String),
+    /// Seralizer error
+    SerializerError(Box<SerializerError>),
+}
+
+impl From<VOWLGrapherStoreErrorKind> for VOWLGrapherError {
+    fn from(value: VOWLGrapherStoreErrorKind) -> Self {
+        <VOWLGrapherStoreError as Into<Self>>::into(value.into())
+    }
 }
 
 /// Encapsulates the error with metadata.
 #[derive(Debug)]
-pub struct VOWLRStoreError {
+pub struct VOWLGrapherStoreError {
     /// The contained error type.
-    inner: VOWLRStoreErrorKind,
+    inner: VOWLGrapherStoreErrorKind,
     /// The error's location in the source code.
     location: &'static Location<'static>,
     /// When the error occurred.
     timestamp: String,
 }
 
-impl From<VOWLRStoreError> for io::Error {
-    fn from(val: VOWLRStoreError) -> Self {
-        io::Error::other(val.to_string())
+impl From<VOWLGrapherStoreError> for io::Error {
+    fn from(val: VOWLGrapherStoreError) -> Self {
+        Self::other(val.to_string())
     }
 }
-impl From<String> for VOWLRStoreError {
+impl From<String> for VOWLGrapherStoreError {
     #[track_caller]
     fn from(error: String) -> Self {
-        VOWLRStoreError {
-            inner: VOWLRStoreErrorKind::InvalidFileType(error),
+        Self {
+            inner: VOWLGrapherStoreErrorKind::InvalidFileType(error),
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
     }
 }
 
-impl From<HornedError> for VOWLRStoreError {
+impl From<HornedError> for VOWLGrapherStoreError {
     #[track_caller]
     fn from(error: HornedError) -> Self {
-        VOWLRStoreError {
-            inner: VOWLRStoreErrorKind::HornedError(error),
+        Self {
+            inner: VOWLGrapherStoreErrorKind::HornedError(Box::new(error)),
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
     }
 }
 
-impl From<IriParseError> for VOWLRStoreError {
+impl From<SerializerError> for VOWLGrapherStoreError {
+    #[track_caller]
+    fn from(error: SerializerError) -> Self {
+        Self {
+            inner: VOWLGrapherStoreErrorKind::SerializerError(Box::new(error)),
+            location: Location::caller(),
+            timestamp: get_timestamp(),
+        }
+    }
+}
+
+impl From<IriParseError> for VOWLGrapherStoreError {
     #[track_caller]
     fn from(error: IriParseError) -> Self {
-        VOWLRStoreError {
-            inner: VOWLRStoreErrorKind::IriParseError(error),
+        Self {
+            inner: VOWLGrapherStoreErrorKind::IriParseError(Box::new(error)),
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
     }
 }
 
-impl From<LoaderError> for VOWLRStoreError {
+impl From<LoaderError> for VOWLGrapherStoreError {
     #[track_caller]
     fn from(error: LoaderError) -> Self {
-        VOWLRStoreError {
-            inner: VOWLRStoreErrorKind::LoaderError(error),
+        Self {
+            inner: VOWLGrapherStoreErrorKind::LoaderError(Box::new(error)),
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
     }
 }
-impl From<VOWLRStoreErrorKind> for VOWLRStoreError {
+impl From<VOWLGrapherStoreErrorKind> for VOWLGrapherStoreError {
     #[track_caller]
-    fn from(error: VOWLRStoreErrorKind) -> Self {
-        VOWLRStoreError {
+    fn from(error: VOWLGrapherStoreErrorKind) -> Self {
+        Self {
             inner: error,
             location: Location::caller(),
             timestamp: get_timestamp(),
@@ -108,98 +141,133 @@ impl From<VOWLRStoreErrorKind> for VOWLRStoreError {
     }
 }
 
-impl From<io::Error> for VOWLRStoreError {
+impl From<io::Error> for VOWLGrapherStoreError {
     #[track_caller]
     fn from(error: io::Error) -> Self {
-        VOWLRStoreError {
-            inner: VOWLRStoreErrorKind::IOError(error),
+        Self {
+            inner: VOWLGrapherStoreErrorKind::IOError(Box::new(error)),
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
     }
 }
-impl From<QueryEvaluationError> for VOWLRStoreError {
+impl From<QueryEvaluationError> for VOWLGrapherStoreError {
     #[track_caller]
     fn from(error: QueryEvaluationError) -> Self {
-        VOWLRStoreError {
-            inner: VOWLRStoreErrorKind::QueryEvaluationError(error),
+        Self {
+            inner: VOWLGrapherStoreErrorKind::QueryEvaluationError(Box::new(error)),
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
     }
 }
-impl From<JoinError> for VOWLRStoreError {
+impl From<JoinError> for VOWLGrapherStoreError {
     #[track_caller]
     fn from(error: JoinError) -> Self {
-        VOWLRStoreError {
-            inner: VOWLRStoreErrorKind::JoinError(error),
+        Self {
+            inner: VOWLGrapherStoreErrorKind::JoinError(Box::new(error)),
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
     }
 }
 
-impl From<StorageError> for VOWLRStoreError {
+impl From<StorageError> for VOWLGrapherStoreError {
     #[track_caller]
     fn from(error: StorageError) -> Self {
-        VOWLRStoreError {
-            inner: VOWLRStoreErrorKind::StorageError(error),
+        Self {
+            inner: VOWLGrapherStoreErrorKind::StorageError(Box::new(error)),
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
     }
 }
 
-impl std::fmt::Display for VOWLRStoreError {
+impl std::fmt::Display for VOWLGrapherStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.inner)
     }
 }
 
-impl std::error::Error for VOWLRStoreError {
+impl std::error::Error for VOWLGrapherStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.inner {
-            VOWLRStoreErrorKind::InvalidFileType(_) => None,
-            VOWLRStoreErrorKind::HornedError(e) => Some(e),
-            VOWLRStoreErrorKind::IOError(e) => Some(e),
-            VOWLRStoreErrorKind::IriParseError(e) => Some(e),
-            VOWLRStoreErrorKind::LoaderError(e) => Some(e),
-            VOWLRStoreErrorKind::QueryEvaluationError(e) => Some(e),
-            VOWLRStoreErrorKind::JoinError(e) => Some(e),
-            VOWLRStoreErrorKind::StorageError(e) => Some(e),
+            VOWLGrapherStoreErrorKind::HornedError(e) => Some(e),
+            VOWLGrapherStoreErrorKind::IOError(e) => Some(e),
+            VOWLGrapherStoreErrorKind::IriParseError(e) => Some(e),
+            VOWLGrapherStoreErrorKind::InvalidFileType(_)
+            | VOWLGrapherStoreErrorKind::IncorrectFileExtension(_)
+            | VOWLGrapherStoreErrorKind::ImportResolutionError(_)
+            | VOWLGrapherStoreErrorKind::RemoteFetchError(_)
+            | VOWLGrapherStoreErrorKind::UnsupportedQueryType(_) => None,
+            VOWLGrapherStoreErrorKind::LoaderError(e) => Some(e),
+            VOWLGrapherStoreErrorKind::QueryEvaluationError(e) => Some(e),
+            VOWLGrapherStoreErrorKind::JoinError(e) => Some(e),
+            VOWLGrapherStoreErrorKind::StorageError(e) => Some(e),
+            VOWLGrapherStoreErrorKind::SerializerError(e) => Some(e),
         }
     }
 }
 
-impl From<VOWLRStoreError> for ErrorRecord {
-    fn from(value: VOWLRStoreError) -> Self {
-        let (message, error_type) = match value.inner {
-            VOWLRStoreErrorKind::InvalidFileType(e) => (e, ErrorType::Parser),
-            VOWLRStoreErrorKind::HornedError(horned_error) => {
-                (horned_error.to_string(), ErrorType::Parser)
+impl From<VOWLGrapherStoreError> for ErrorRecord {
+    fn from(value: VOWLGrapherStoreError) -> Self {
+        let (message, severity, error_type) = match value.inner {
+            VOWLGrapherStoreErrorKind::InvalidFileType(e) => {
+                (e, ErrorSeverity::Critical, ErrorType::Parser)
             }
-            VOWLRStoreErrorKind::IOError(error) => {
-                (error.to_string(), ErrorType::InternalServerError)
+            VOWLGrapherStoreErrorKind::IncorrectFileExtension(e)
+            | VOWLGrapherStoreErrorKind::ImportResolutionError(e)
+            | VOWLGrapherStoreErrorKind::RemoteFetchError(e) => {
+                (e, ErrorSeverity::Warning, ErrorType::Parser)
             }
-            VOWLRStoreErrorKind::IriParseError(iri_parse_error) => {
-                (iri_parse_error.to_string(), ErrorType::Parser)
+            VOWLGrapherStoreErrorKind::HornedError(horned_error) => (
+                horned_error.to_string(),
+                ErrorSeverity::Critical,
+                ErrorType::Parser,
+            ),
+            VOWLGrapherStoreErrorKind::IOError(error) => (
+                error.to_string(),
+                ErrorSeverity::Critical,
+                ErrorType::InternalServerError,
+            ),
+            VOWLGrapherStoreErrorKind::IriParseError(iri_parse_error) => (
+                iri_parse_error.to_string(),
+                ErrorSeverity::Critical,
+                ErrorType::Parser,
+            ),
+            VOWLGrapherStoreErrorKind::LoaderError(loader_error) => (
+                loader_error.to_string(),
+                ErrorSeverity::Critical,
+                ErrorType::Database,
+            ),
+            VOWLGrapherStoreErrorKind::QueryEvaluationError(query_evaluation_error) => (
+                query_evaluation_error.to_string(),
+                ErrorSeverity::Critical,
+                ErrorType::Database,
+            ),
+            VOWLGrapherStoreErrorKind::JoinError(join_error) => (
+                join_error.to_string(),
+                ErrorSeverity::Critical,
+                ErrorType::InternalServerError,
+            ),
+            VOWLGrapherStoreErrorKind::StorageError(storage_error) => (
+                storage_error.to_string(),
+                ErrorSeverity::Critical,
+                ErrorType::Database,
+            ),
+            VOWLGrapherStoreErrorKind::UnsupportedQueryType(e) => {
+                (e, ErrorSeverity::Critical, ErrorType::Database)
             }
-            VOWLRStoreErrorKind::LoaderError(loader_error) => {
-                (loader_error.to_string(), ErrorType::Database)
-            }
-            VOWLRStoreErrorKind::QueryEvaluationError(query_evaluation_error) => {
-                (query_evaluation_error.to_string(), ErrorType::Database)
-            }
-            VOWLRStoreErrorKind::JoinError(join_error) => {
-                (join_error.to_string(), ErrorType::InternalServerError)
-            }
-            VOWLRStoreErrorKind::StorageError(storage_error) => {
-                (storage_error.to_string(), ErrorType::Database)
-            }
+            VOWLGrapherStoreErrorKind::SerializerError(serializer_error) => (
+                serializer_error.to_string(),
+                ErrorSeverity::Critical,
+                ErrorType::Parser,
+            ),
         };
-        ErrorRecord::new(
+
+        Self::new(
             value.timestamp,
-            ErrorSeverity::Critical,
+            severity,
             error_type,
             message,
             #[cfg(debug_assertions)]
@@ -208,8 +276,8 @@ impl From<VOWLRStoreError> for ErrorRecord {
     }
 }
 
-impl From<VOWLRStoreError> for VOWLRError {
-    fn from(value: VOWLRStoreError) -> Self {
-        <ErrorRecord as Into<VOWLRError>>::into(value.into())
+impl From<VOWLGrapherStoreError> for VOWLGrapherError {
+    fn from(value: VOWLGrapherStoreError) -> Self {
+        <ErrorRecord as Into<Self>>::into(value.into())
     }
 }

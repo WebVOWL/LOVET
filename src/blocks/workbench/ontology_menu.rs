@@ -12,11 +12,10 @@ use leptos::task::spawn_local_scoped_with_cancellation;
 use log::info;
 use std::iter::once;
 use strum::IntoEnumIterator;
-use vowlr_sparql_queries::prelude::DEFAULT_QUERY;
+use vowlgrapher_sparql_queries::prelude::DEFAULT_QUERY;
+use vowlgrapher_util::prelude::VOWLGrapherEnviron;
 use web_sys::Event;
 use web_sys::HtmlInputElement;
-
-const MAX_FILE_SIZE_BYTES: f64 = 50.0 * 1024.0 * 1024.0;
 
 #[component]
 pub fn SelectStaticInput() -> impl IntoView {
@@ -31,7 +30,10 @@ pub fn SelectStaticInput() -> impl IntoView {
         if let Some(stored) = selected_ontology.get() {
             active_graph_name.set(stored.path().to_string());
             match load_stored_ontology(stored).await {
-                Ok(()) => {
+                Ok(warning) => {
+                    if let Some(e) = warning {
+                        error_context.extend(e.records);
+                    }
                     load_graph(DEFAULT_QUERY.to_string(), true).await;
                 }
                 Err(e) => {
@@ -122,7 +124,10 @@ pub fn UploadInput() -> impl IntoView {
             active_graph_name.set(file_name.get_untracked());
 
             match value {
-                Ok(_) => {
+                Ok((_, _, warning)) => {
+                    if let Some(e) = warning {
+                        error_context.extend(e.records);
+                    }
                     spawn_local_scoped_with_cancellation(async move {
                         load_graph(DEFAULT_QUERY.to_string(), true).await;
                     });
@@ -139,7 +144,10 @@ pub fn UploadInput() -> impl IntoView {
             active_graph_name.set(url_name.get_untracked());
 
             match value {
-                Ok(_) => {
+                Ok((_, _, warning)) => {
+                    if let Some(e) = warning {
+                        error_context.extend(e.records);
+                    }
                     spawn_local_scoped_with_cancellation(async move {
                         load_graph(DEFAULT_QUERY.to_string(), true).await;
                     });
@@ -152,15 +160,25 @@ pub fn UploadInput() -> impl IntoView {
     });
 
     let upload_files = move |ev: Event| {
+        let VOWLGrapherEnviron {
+            max_input_size_bytes,
+            ..
+        } = expect_context::<VOWLGrapherEnviron>();
+
         let input: HtmlInputElement = event_target(&ev);
         if let Some(files) = input.files() {
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "decimals don't matter in comparison"
+            )]
             if let Some(file) = files.item(0)
-                && file.size() > MAX_FILE_SIZE_BYTES
+                && file.size() as u64 > max_input_size_bytes.0
             {
                 let err_msg = format!(
-                    "File {} exceeds the maximum allowed size of {}MB.",
+                    "File '{}' exceeds the maximum allowed size of {}",
                     file.name(),
-                    MAX_FILE_SIZE_BYTES / 1024.0 / 1024.0
+                    max_input_size_bytes.display().si()
                 );
                 error_context.push(ClientErrorKind::FileUploadError(err_msg).into());
                 input.set_value("");

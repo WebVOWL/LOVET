@@ -1,0 +1,32 @@
+[package]
+    authors.workspace=true
+    description="Serializer code for VOWLGrapher"
+    edition.workspace=true
+    license-file.workspace=true
+    name="vowlgrapher-serializer"
+    readme="README.md"
+    repository.workspace=true
+    version.workspace=true
+
+[lib]
+    crate-type=["cdylib", "rlib"]
+
+[lints]
+    workspace=true
+
+[dependencies]
+    env_logger={workspace=true}
+    fluent-uri="0.4.1"
+    futures={workspace=true}
+    grapher={workspace=true}
+    log={workspace=true}
+    oxrdf="0.3.1"
+    rayon.workspace=true
+    rdf-fusion={workspace=true}
+    smallvec={workspace=true}
+    strum.workspace=true
+    tokio={workspace=true}
+    unescape_zero_copy="2.3.1"
+    vowlgrapher-parser={path="../parser"}
+    vowlgrapher-sparql-queries={path="../sparql_queries"}
+    vowlgrapher-util={path="../util"}

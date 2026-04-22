@@ -1,10 +1,10 @@
 [package]
     authors.workspace=true
-    description="Utility code used by the entire VOWL-R workspace"
+    description="Utility code used by the entire VOWLGrapher workspace"
     edition.workspace=true
     keywords.workspace=true
     license-file.workspace=true
-    name="vowlr-util"
+    name="vowlgrapher-util"
     readme="README.md"
     repository.workspace=true
     version.workspace=true
@@ -17,6 +17,7 @@
 
 [dependencies]
     actix-session={workspace=true, optional=true}
+    bytesize.workspace=true
     leptos.workspace=true
     leptos_actix={workspace=true, optional=true}
     log.workspace=true
@@ -26,7 +27,9 @@
     tabled={version="0.20", optional=true}
     time={version="0.3.47", features=["formatting", "macros"]}
     uuid={version="1.22.0", features=["v4"], optional=true}
+    web-sys={workspace=true, features=["Window", "Performance"], optional=true}
 
 [features]
     server=["dep:tabled"]
     ssr=["dep:leptos_actix", "dep:actix-session", "dep:uuid"]
+    wasm=["time/wasm-bindgen", "dep:web-sys"]

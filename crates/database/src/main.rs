@@ -5,10 +5,14 @@
 use env_logger::Env;
 use std::env;
 use std::path::Path;
-use vowlr_database::prelude::VOWLRStore;
-use vowlr_sparql_queries::prelude::DEFAULT_QUERY;
+use vowlgrapher_database::prelude::VOWLGrapherStore;
+use vowlgrapher_sparql_queries::prelude::DEFAULT_QUERY;
 
 /// Entrypoint
+#[expect(
+    clippy::expect_used,
+    reason = "code not running in production is allowed to panic"
+)]
 #[tokio::main]
 pub async fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
@@ -18,10 +22,13 @@ pub async fn main() {
     } else {
         Path::new("crates/database/owl1-unions-simple.owl")
     };
-    let store = VOWLRStore::default();
+    let store = VOWLGrapherStore::default();
     store
         .insert_file(path, false)
         .await
         .expect("Error inserting file");
-    store.query(DEFAULT_QUERY.to_string(), None).await.unwrap();
+    store
+        .query(DEFAULT_QUERY.to_string(), None)
+        .await
+        .expect("querying the store should succeed");
 }

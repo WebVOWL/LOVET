@@ -9,7 +9,7 @@ pub const DEFAULT_PREFIXES: [&str; 6] = [
     "rdfs: <http://www.w3.org/2000/01/rdf-schema#>",
     "rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>",
     "xsd: <http://www.w3.org/2001/XMLSchema#>",
-    "vowlr: <http://www.example.com/iri#>",
+    "vowlgrapher: <http://www.example.com/iri#>",
     "xml: <http://www.w3.org/XML/1998/namespace>",
 ];
 
@@ -23,11 +23,11 @@ impl QueryAssembler {
     /// An example of a prefix is: `owl: <http://www.w3.org/2002/07/owl#>`.
     ///
     /// `snippets` is the collection of SPARQL snippets to use.
-    pub fn assemble_query(prefixes: Vec<&str>, snippets: Vec<&'static str>) -> String {
+    pub fn assemble_query(prefixes: &Vec<&str>, snippets: &Vec<&'static str>) -> String {
         format!(
-            r#"
+            r"
             {}
-            SELECT DISTINCT ?id ?nodeType ?target ?label
+            SELECT ?id ?nodeType ?target ?label
             WHERE {{
                 GRAPH <{{GRAPH_IRI}}> {{
                     {}
@@ -40,7 +40,7 @@ impl QueryAssembler {
                 }}
             }}
             ORDER BY ?weight
-        "#,
+        ",
             prefixes
                 .iter()
                 .map(|item| format!("PREFIX {item}"))
@@ -48,11 +48,14 @@ impl QueryAssembler {
                 .join("\n"),
             snippets
                 .iter()
-                .map(|item| item.to_string())
+                .map(std::string::ToString::to_string)
                 .filter(|item| !item.is_empty())
                 .collect::<Vec<_>>()
                 .join(" UNION "),
         )
+        .as_str()
+        .trim_start()
+        .to_string()
     }
 
     /// Construct a filtered SPARQL query based on the truth value of entries in `element_filter`.
@@ -68,7 +71,7 @@ impl QueryAssembler {
         } else {
             snippets.extend(GENERAL_SNIPPETS);
         }
-        Self::assemble_query(DEFAULT_PREFIXES.into(), snippets)
+        Self::assemble_query(&DEFAULT_PREFIXES.into(), &snippets)
     }
 
     /// Construct a custom SPARQL query based of query inserted by the user in the UI(query_menu)
