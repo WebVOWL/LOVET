@@ -65,9 +65,7 @@
         bytesize="2.3.1"
         env_logger="0.11"
         futures="0.3.31"
-        grapher={features=[
-            "webgl",
-        ], git="https://github.com/WebVOWL/WasmGrapher"}
+        grapher={features=["webgl"], path="../WasmGrapher"}
         horned-owl={git="https://github.com/phillord/horned-owl", tag="v1.4.0"}
         leptos={version="0.8.16", features=["nightly", "multipart", "rkyv"]}
         leptos_actix="0.8.7"

@@ -1,4 +1,5 @@
 use crate::errors::{ClientErrorKind, ErrorLogContext};
+use crate::events::EventHandler;
 use crate::pages::home::Home;
 use leptos::prelude::*;
 use leptos::task::spawn_local_scoped_with_cancellation;
@@ -35,6 +36,9 @@ pub fn App() -> impl IntoView {
         };
         provide_context(environ);
     });
+
+    // Initiate the event handler
+    spawn_local_scoped_with_cancellation(async move { EventHandler::handle_event().await });
 
     view! {
         <Stylesheet id="vowlgrapher" href="/pkg/vowlgrapher.css" />
