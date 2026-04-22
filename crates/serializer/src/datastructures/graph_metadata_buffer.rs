@@ -32,7 +32,7 @@ pub struct GraphMetadataBuffer {
     ///
     /// ## Note
     /// The usage of this annotation property on entities other than ontologies is [discouraged](https://www.w3.org/TR/owl-syntax/#Ontology_Annotations).
-    /// As such, we notify the client if this is violated.
+    /// As such, we should notify the client if this is violated.
     pub prior_version: Arc<RwLock<Option<usize>>>,
     /// The term's cooresponding id which describes the prior version of the ontology that is incompatible with the current version, i.e., [`Self::version_iri`]-
     ///
@@ -40,7 +40,7 @@ pub struct GraphMetadataBuffer {
     ///
     /// ## Note
     /// The usage of this annotation property on entities other than ontologies is [discouraged](https://www.w3.org/TR/owl-syntax/#Ontology_Annotations).
-    /// As such, we notify the client if this is violated.
+    /// As such, we should notify the client if this is violated.
     pub incompatible_with: Arc<RwLock<Option<usize>>>,
     /// The term's cooresponding id which describes the prior version of the ontology that is compatible with the current version, i.e., [`Self::version_iri`]-
     ///
@@ -49,7 +49,7 @@ pub struct GraphMetadataBuffer {
     ///
     /// ## Note
     /// The usage of this annotation property on entities other than ontologies is [discouraged](https://www.w3.org/TR/owl-syntax/#Ontology_Annotations).
-    /// As such, we notify the client if this is violated.
+    /// As such, we should notify the client if this is violated.
     pub backward_compatible_with: Arc<RwLock<Option<usize>>>,
     /// Maps from `owl:annotatedSource` to a hashmap, mapping `owl:annotatedProperty` to `owl:annotatedTarget`.
     #[expect(unused, reason = "pending implementation")]

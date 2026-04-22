@@ -1,7 +1,9 @@
 mod ontology_header;
 
 use crate::{
-    blocks::right_sidebar::ontology_header::{Author, Description, Language, OntologyIri, Version},
+    blocks::right_sidebar::ontology_header::{
+        Author, Description, DocumentBase, Language, OntologyHeader, Version,
+    },
     components::{
         accordion::Accordion, buttons::graph_interaction_buttons::GraphInteractionButtons,
     },
@@ -48,16 +50,7 @@ pub fn RightSidebar() -> impl IntoView {
                 class=("w-[22%]", move || is_open.get())
                 class=("w-0", move || !is_open.get())
             >
-
-                <p class="py-4 font-thin text-center text-gray-500 text-[1.5em]">
-                    "Friend of a Friend (FOAF) vocabulary"
-                </p>
-                <OntologyIri />
-                <Version />
-                <Author />
-                <Language />
-                <Description />
-                <MetaData />
+                <OntologyHeader />
                 <SelectionDetails />
             </div>
             <GraphInteractionButtons is_sidebar_open=is_open />

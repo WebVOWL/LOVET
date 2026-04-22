@@ -33,7 +33,7 @@ use crate::{
             create_triple_from_id, create_triple_from_iri, get_or_create_anchor_thing,
             get_or_create_domain_thing,
         },
-        is_ontology, is_synthetic,
+        is_synthetic,
         labels::extend_element_label,
         nodes::{
             has_named_equivalent_aliases, increment_individual_count, insert_node,
@@ -375,23 +375,18 @@ fn internal_serialize_triple(
                                 data_buffer.term_index.get(object_term_id)?
                             );
                             warn!("{msg}");
-                            return Err(SerializationErrorKind::SerializationWarningTriple(
-                                data_buffer.term_index.display_triple(&triple)?,
-                                msg,
-                            )
-                            .into());
-                        } else if is_ontology(&data_buffer.term_index.get(triple.subject_term_id)?)
-                        {
+                            data_buffer.failed_buffer.write()?.push(
+                                SerializationErrorKind::SerializationWarningTriple(
+                                    data_buffer.term_index.display_triple(&triple)?,
+                                    msg,
+                                )
+                                .into(),
+                            );
+                        } else {
                             *data_buffer.metadata.backward_compatible_with.write()? =
                                 Some(object_term_id);
-                            return Ok(SerializationStatus::Serialized);
                         }
-                        let msg = "The usage of backwardCompatibleWith annotation property on entities other than ontologies is discouraged, according to: https://www.w3.org/TR/owl-syntax/#Ontology_Annotations".to_string();
-                        return Err(SerializationErrorKind::SerializationFailedTriple(
-                            data_buffer.term_index.display_triple(&triple)?,
-                            msg,
-                        )
-                        .into());
+                        return Ok(SerializationStatus::Serialized);
                     }
                     None => {
                         return Err(SerializationErrorKind::MissingObject(
@@ -755,22 +750,17 @@ fn internal_serialize_triple(
                                 data_buffer.term_index.get(object_term_id)?
                             );
                             warn!("{msg}");
-                            return Err(SerializationErrorKind::SerializationWarningTriple(
-                                data_buffer.term_index.display_triple(&triple)?,
-                                msg,
-                            )
-                            .into());
-                        } else if is_ontology(&data_buffer.term_index.get(triple.subject_term_id)?)
-                        {
+                            data_buffer.failed_buffer.write()?.push(
+                                SerializationErrorKind::SerializationWarningTriple(
+                                    data_buffer.term_index.display_triple(&triple)?,
+                                    msg,
+                                )
+                                .into(),
+                            );
+                        } else {
                             *data_buffer.metadata.incompatible_with.write()? = Some(object_term_id);
-                            return Ok(SerializationStatus::Serialized);
                         }
-                        let msg = "The usage of incompatibleWith annotation property on entities other than ontologies is discouraged, according to: https://www.w3.org/TR/owl-syntax/#Ontology_Annotations".to_string();
-                        return Err(SerializationErrorKind::SerializationFailedTriple(
-                            data_buffer.term_index.display_triple(&triple)?,
-                            msg,
-                        )
-                        .into());
+                        return Ok(SerializationStatus::Serialized);
                     }
                     None => {
                         return Err(SerializationErrorKind::MissingObject(
@@ -1037,22 +1027,17 @@ fn internal_serialize_triple(
                                 data_buffer.term_index.get(object_term_id)?
                             );
                             warn!("{msg}");
-                            return Err(SerializationErrorKind::SerializationWarningTriple(
-                                data_buffer.term_index.display_triple(&triple)?,
-                                msg,
-                            )
-                            .into());
-                        } else if is_ontology(&data_buffer.term_index.get(triple.subject_term_id)?)
-                        {
+                            data_buffer.failed_buffer.write()?.push(
+                                SerializationErrorKind::SerializationWarningTriple(
+                                    data_buffer.term_index.display_triple(&triple)?,
+                                    msg,
+                                )
+                                .into(),
+                            );
+                        } else {
                             *data_buffer.metadata.prior_version.write()? = Some(object_term_id);
-                            return Ok(SerializationStatus::Serialized);
                         }
-                        let msg = "The usage of priorVersion annotation property on entities other than ontologies is discouraged, according to: https://www.w3.org/TR/owl-syntax/#Ontology_Annotations".to_string();
-                        return Err(SerializationErrorKind::SerializationFailedTriple(
-                            data_buffer.term_index.display_triple(&triple)?,
-                            msg,
-                        )
-                        .into());
+                        return Ok(SerializationStatus::Serialized);
                     }
                     None => {
                         return Err(SerializationErrorKind::MissingObject(
@@ -1176,13 +1161,16 @@ fn internal_serialize_triple(
                                 data_buffer.term_index.get(object_term_id)?
                             );
                             warn!("{msg}");
-                            return Err(SerializationErrorKind::SerializationWarningTriple(
-                                data_buffer.term_index.display_triple(&triple)?,
-                                msg,
-                            )
-                            .into());
+                            data_buffer.failed_buffer.write()?.push(
+                                SerializationErrorKind::SerializationWarningTriple(
+                                    data_buffer.term_index.display_triple(&triple)?,
+                                    msg,
+                                )
+                                .into(),
+                            );
+                        } else {
+                            *data_buffer.metadata.version_iri.write()? = Some(object_term_id);
                         }
-                        *data_buffer.metadata.version_iri.write()? = Some(object_term_id);
                         return Ok(SerializationStatus::Serialized);
                     }
                     None => {
