@@ -4,9 +4,9 @@ use leptos::prelude::*;
 #[component]
 pub fn Title(#[prop(into)] title: Signal<String>) -> impl IntoView {
     view! {
-                        <p class="py-4 font-thin text-center text-gray-500 text-[1.5em]">
-                    {move || title.get()}
-                </p>
+        <p class="py-4 font-thin text-center text-gray-500 text-[1.5em]">
+            {move || title.get()}
+        </p>
     }
 }
 
@@ -32,26 +32,26 @@ pub fn Version(
     #[prop(into)] incompatible_with: Signal<Option<String>>,
     #[prop(into)] backward_compatible_with: Signal<Option<String>>,
 ) -> impl IntoView {
-    let ontologyversion = RwSignal::new("0.99".to_string());
     view! {
         <p class="flex gap-2 justify-center items-center py-2 my-2 text-sm text-gray-500">
             "Version: "{move || version_iri.get().unwrap_or("None".to_string())}
-            <br/>
-            "Prior Version: "{move || prior_version.get().unwrap_or("None".to_string())}
-            <br/>
-            "Incompatible With: "{move || incompatible_with.get().unwrap_or("None".to_string())}
-            <br/>
-            "Backward Compatible With: "{move || backward_compatible_with.get().unwrap_or("None".to_string())}
+            <br /> "Prior Version: "
+            {move || prior_version.get().unwrap_or("None".to_string())} <br />
+            "Incompatible With: "
+            {move || incompatible_with.get().unwrap_or("None".to_string())}
+            <br /> "Backward Compatible With: "
+            {move || {
+                backward_compatible_with.get().unwrap_or("None".to_string())
+            }}
         </p>
     }
 }
 
 #[component]
-pub fn Author() -> impl IntoView {
-    let ontologyauthors = RwSignal::new("Alice, Bob, Charlie".to_string());
+pub fn Author(#[prop(into)] authors: Signal<Vec<String>>) -> impl IntoView {
     view! {
         <p class="flex gap-2 justify-center items-center py-2 my-2 text-sm text-gray-500">
-            Author(s): {move || ontologyauthors.get()}
+            Author(s): {move || authors.get()}
         </p>
     }
 }
@@ -80,11 +80,10 @@ pub fn Language() -> impl IntoView {
 }
 
 #[component]
-pub fn Description() -> impl IntoView {
-    let ontologydescription = RwSignal::new("The Friend of a Friend (FOAF) RDF vocabulary, described using W3C RDF Schema and the Web Ontology Language.".to_string());
+pub fn Description(#[prop(into)] desc: Signal<String>) -> impl IntoView {
     view! {
         <Accordion title="Description">
-            <p>{move || ontologydescription.get()}</p>
+            <p>{move || desc.get()}</p>
         </Accordion>
     }
 }
@@ -96,8 +95,14 @@ pub fn OntologyHeader() -> impl IntoView {
     let document_base = create_read_slice(graph_metadata, |graph_metadata| {
         graph_metadata.document_base.clone()
     });
+    let title = create_read_slice(graph_metadata, |graph_metadata| {
+        graph_metadata.title.clone()
+    });
     let description = create_read_slice(graph_metadata, |graph_metadata| {
         graph_metadata.description.clone()
+    });
+    let authors = create_read_slice(graph_metadata, |graph_metadata| {
+        graph_metadata.authors.clone()
     });
     let version_iri = create_read_slice(graph_metadata, |graph_metadata| {
         graph_metadata.version_iri.clone()
@@ -114,13 +119,17 @@ pub fn OntologyHeader() -> impl IntoView {
 
     view! {
         <div>
-                <Title title="Implement" />
-                <DocumentBase base=document_base />
-                <Version version_iri=version_iri prior_version=prior_version incompatible_with=incompatible_with backward_compatible_with=backward_compatible_with />
-                <Author />
-                <Language />
-                <Description />
-            </div>
-
+            <Title title=title />
+            <DocumentBase base=document_base />
+            <Version
+                version_iri=version_iri
+                prior_version=prior_version
+                incompatible_with=incompatible_with
+                backward_compatible_with=backward_compatible_with
+            />
+            <Author authors=authors />
+            <Language />
+            <Description desc=description />
+        </div>
     }
 }
