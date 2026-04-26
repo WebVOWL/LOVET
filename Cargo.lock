@@ -8280,6 +8280,7 @@ dependencies = [
  "futures",
  "grapher",
  "log",
+ "oxilangtag",
  "oxrdf",
  "rayon",
  "rdf-fusion",
