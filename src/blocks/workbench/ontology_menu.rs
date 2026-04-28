@@ -24,7 +24,8 @@ pub fn SelectStaticInput() -> impl IntoView {
         active_graph_name, ..
     } = expect_context::<GraphDataContext>();
 
-    let selected_ontology: RwSignal<Option<StoredOntology>> = RwSignal::new(None);
+    let selected_ontology: RwSignal<Option<StoredOntology>> =
+        RwSignal::new(Some(StoredOntology::FriendOfAFriend));
 
     let stored_res = LocalResource::new(move || async move {
         if let Some(stored) = selected_ontology.get() {
