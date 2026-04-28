@@ -8235,6 +8235,7 @@ dependencies = [
  "test-generator",
  "tokio",
  "unescape_zero_copy",
+ "uuid",
  "vowlgrapher-parser",
  "vowlgrapher-serializer",
  "vowlgrapher-sparql-queries",
@@ -8284,6 +8285,8 @@ name = "vowlgrapher-sparql-queries"
 version = "0.1.0-alpha"
 dependencies = [
  "grapher",
+ "once_cell",
+ "regex",
  "vowlgrapher-util",
 ]
 
