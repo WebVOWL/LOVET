@@ -17,7 +17,7 @@ use vowlgrapher_util::prelude::ErrorRecord;
 
 use crate::{
     datastructures::{
-        ArcTerm, LanguageTag, MetadataContent, TermID, index::TermIndex,
+        ArcTerm, LanguageTag, MetadataContent, index::TermIndex,
         serialization_data_buffer::SerializationDataBuffer,
     },
     errors::{SerializationError, SerializationErrorKind},
@@ -276,17 +276,8 @@ pub fn translate_metadata_content(
 ) -> Vec<String> {
     content
         .iter()
-        .map(|content_term_id| translate_term_with_fallback(term_index, *content_term_id))
+        .map(|content_term_id| term_index.display_term(*content_term_id))
         .collect()
-}
-
-/// Translates a term id into a term string, consuming any error as part of the returned string.
-///
-/// Use only in infallible contexts.
-pub fn translate_term_with_fallback(term_index: &TermIndex, term_id: TermID) -> String {
-    term_index
-        .get(term_id)
-        .map_or_else(|e| e.to_string(), |term| term.to_string())
 }
 
 /// Converts a [`NamedNodeRef`] into a term.

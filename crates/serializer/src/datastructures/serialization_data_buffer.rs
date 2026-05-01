@@ -5,8 +5,7 @@ use crate::{
     },
     errors::{SerializationError, SerializationErrorKind},
     serializer_util::{
-        fmt_langtag, named_node_to_term, translate_metadata_content, translate_term_with_fallback,
-        trim_tag_circumfix,
+        fmt_langtag, named_node_to_term, translate_metadata_content, trim_tag_circumfix,
     },
     vocab::{
         dcmi::{dc, dcterms},
@@ -419,10 +418,7 @@ impl SerializationDataBuffer {
                     .version_iri
                     .read()?
                     .and_then(|version_term_id| {
-                        Some(translate_term_with_fallback(
-                            self_term_index,
-                            version_term_id,
-                        ))
+                        Some(self_term_index.display_term(version_term_id))
                     });
                 Ok(a)
             }
@@ -453,10 +449,7 @@ impl SerializationDataBuffer {
                 .prior_version
                 .read()?
                 .and_then(|prior_version_term_id| {
-                    Some(translate_term_with_fallback(
-                        &self.term_index,
-                        prior_version_term_id,
-                    ))
+                    Some(self.term_index.display_term(prior_version_term_id))
                 })
         };
         metadata_buffer.graph_header.incompatible_with = {
@@ -464,19 +457,16 @@ impl SerializationDataBuffer {
                 .incompatible_with
                 .read()?
                 .and_then(|incompatible_with_term_id| {
-                    Some(translate_term_with_fallback(
-                        &self.term_index,
-                        incompatible_with_term_id,
-                    ))
+                    Some(self.term_index.display_term(incompatible_with_term_id))
                 })
         };
         metadata_buffer.graph_header.backward_compatible_with = {
             self.metadata.backward_compatible_with.read()?.and_then(
                 |backward_compatible_with_term_id| {
-                    Some(translate_term_with_fallback(
-                        &self.term_index,
-                        backward_compatible_with_term_id,
-                    ))
+                    Some(
+                        self.term_index
+                            .display_term(backward_compatible_with_term_id),
+                    )
                 },
             )
         };
@@ -528,8 +518,7 @@ impl SerializationDataBuffer {
                 }
             } else {
                 for metadata_term_id in metadata_types.keys() {
-                    let metadata_term =
-                        translate_term_with_fallback(&self.term_index, *metadata_term_id);
+                    let metadata_term = self.term_index.display_term(*metadata_term_id);
                     let msg = self.term_index.get(term_id).map_or_else(
                     |e| {
                         format!(

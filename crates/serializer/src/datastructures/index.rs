@@ -188,7 +188,9 @@ impl TermIndex {
         ))
     }
 
-    /// Returns a pretty-printed version of the term, falling back to the id if the id is invalid.
+    /// Translates a term id into a term string, consuming any error as part of the returned string.
+    ///
+    /// Use only in infallible contexts.
     pub fn display_term(&self, term_id: usize) -> String {
         self.get(term_id)
             .map_or_else(|e| e.to_string(), |term| term.to_string())
