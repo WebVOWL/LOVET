@@ -351,6 +351,15 @@ impl SerializationDataBuffer {
     ) -> Result<(), SerializationError> {
         let mut metadata_buffer = GraphMetadata::new();
 
+        metadata_buffer.languages = {
+            let mut lang_buffer = self.metadata.lanuages.write()?;
+            let mut languages = Vec::with_capacity(lang_buffer.len());
+            if lang_buffer.remove(&None) {
+                languages.push(None);
+            }
+            languages.extend(take(&mut *lang_buffer));
+            languages
+        };
         metadata_buffer.graph_header.document_base = self
             .document_base
             .read()?

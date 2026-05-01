@@ -7,12 +7,12 @@ use crate::{
         fmt_langtag, labels::extract_label, translate_metadata_content, trim_tag_circumfix,
     },
 };
-use std::fmt::Write;
 use std::{
     collections::HashMap,
     fmt::Display,
     sync::{Arc, RwLock},
 };
+use std::{collections::HashSet, fmt::Write};
 
 #[derive(Default)]
 pub struct GraphMetadataBuffer {
@@ -20,6 +20,8 @@ pub struct GraphMetadataBuffer {
     ///
     /// Reduces memory usage and allocations.
     pub term_index: Arc<TermIndex>,
+    /// Stores all language tags registered in the input.
+    pub lanuages: Arc<RwLock<HashSet<Option<String>>>>,
     /// The term's corresponding id which describes the version of an ontology.
     ///
     /// owl:versionIRI
@@ -183,8 +185,16 @@ impl GraphMetadataBuffer {
         for (metadata_term_id, element_metadata) in map {
             let title = {
                 match self.term_index.get(metadata_term_id) {
-                    Ok(metadata_term) => extract_label(None, &metadata_term)
-                        .unwrap_or_else(|| trim_tag_circumfix(&metadata_term.to_string())),
+                    Ok(metadata_term) => match extract_label(None, &metadata_term) {
+                        (Some(label), maybe_lang_tag) => {
+                            format!(
+                                "'{label}'{}",
+                                maybe_lang_tag
+                                    .map_or_else(String::new, |tag| { format!("@{tag}") })
+                            )
+                        }
+                        _ => trim_tag_circumfix(&metadata_term.to_string()),
+                    },
                     Err(e) => e.to_string(),
                 }
             };

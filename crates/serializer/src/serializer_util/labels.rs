@@ -23,41 +23,48 @@ pub fn insert_label(
         return Ok(());
     }
 
-    if let Some(label) = extract_label(maybe_label_term, term) {
-        // TODO: Refactor label_buffer to handle language tags
+    if let (Some(label), lang_tag) = extract_label(maybe_label_term, term) {
         data_buffer
             .label_buffer
             .write()?
             .insert(term_id, Some(label));
-    }
 
+        data_buffer.metadata.lanuages.write()?.insert(lang_tag);
+    }
     Ok(())
 }
 
-/// Returns the label extracted from the term or None if no label was found.
+/// Returns the label and associated language tag extracted from the term or None if no label was found.
 ///
 /// Labels are extracted with the following priority:
 ///
 /// 1. Use `maybe_label_term` if it's [`Some`].
 /// 2. Use the fragment component of the term, if it exist.
 /// 3. Use the path component of the term, if it exist.
-pub fn extract_label(maybe_label_term: Option<&Term>, term: &Term) -> Option<String> {
+pub fn extract_label(
+    maybe_label_term: Option<&Term>,
+    term: &Term,
+) -> (Option<String>, Option<String>) {
     if let Some(label_term) = maybe_label_term {
         // Handle language tags and cases where label contains "
         let stripped_label = trim_tag_circumfix(&label_term.to_string())
             .trim_start_matches('"')
             .trim_end_matches('"')
             .to_string();
-        let (label, lang_tag) = {
+        let (label, lang_tag_opt) = {
             stripped_label.rsplit_once('@').map_or_else(
-                || (stripped_label.clone(), ""),
+                || (stripped_label.clone(), None),
                 |(label, lang_tag)| {
                     (
                         label
                             .trim_start_matches('"')
                             .trim_end_matches('"')
                             .to_string(),
-                        lang_tag,
+                        if lang_tag.is_empty() {
+                            None
+                        } else {
+                            Some(lang_tag.to_string())
+                        },
                     )
                 },
             )
@@ -71,14 +78,11 @@ pub fn extract_label(maybe_label_term: Option<&Term>, term: &Term) -> Option<Str
         } else {
             trace!(
                 "Inserting {}label '{clean_label}' for term '{term}'",
-                if lang_tag.is_empty() {
-                    String::new()
-                } else {
-                    format!("{lang_tag} ")
-                }
+                lang_tag_opt
+                    .as_ref()
+                    .map_or_else(String::new, |lang_tag| format!("{lang_tag} "))
             );
-
-            return Some(clean_label);
+            return (Some(clean_label), lang_tag_opt);
         }
     } else {
         let iri = term.to_string();
@@ -87,13 +91,13 @@ pub fn extract_label(maybe_label_term: Option<&Term>, term: &Term) -> Option<Str
             Ok(parsed_iri) => {
                 if let Some(frag) = parsed_iri.fragment() {
                     trace!("Inserting fragment '{frag}' as label for iri '{term}'");
-                    return Some(frag.to_string());
+                    return (Some(frag.to_string()), None);
                 }
                 debug!("No fragment found in iri '{iri}'");
                 match parsed_iri.path().rsplit_once('/') {
                     Some(path) => {
                         trace!("Inserting path '{}' as label for iri '{}'", path.1, term);
-                        return Some(path.1.to_string());
+                        return (Some(path.1.to_string()), None);
                     }
                     None => {
                         debug!("No path found in iri '{iri}'");
@@ -106,7 +110,7 @@ pub fn extract_label(maybe_label_term: Option<&Term>, term: &Term) -> Option<Str
             }
         }
     }
-    None
+    (None, None)
 }
 
 pub fn merge_optional_labels(left: Option<&String>, right: Option<&String>) -> Option<String> {
