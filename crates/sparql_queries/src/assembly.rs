@@ -1,7 +1,9 @@
 use crate::snippets::SparqlSnippet;
 use crate::{prelude::GENERAL_SNIPPETS, snippets::void::VOID};
 use grapher::prelude::ElementType;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use regex::Regex;
+use once_cell::sync::Lazy;
 
 // TODO: Remove when automatic prefix fetching is implemented.
 pub const DEFAULT_PREFIXES: [&str; 6] = [
@@ -12,6 +14,10 @@ pub const DEFAULT_PREFIXES: [&str; 6] = [
     "vowlgrapher: <http://www.example.com/iri#>",
     "xml: <http://www.w3.org/XML/1998/namespace>",
 ];
+
+static VAR_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"[?$]([a-zA-Z_][a-zA-Z0-9_\u00B7\u0300-\u036F\u203F-\u2040]*)").unwrap()
+});
 
 /// Compiles snippets of SPARQL code into full-fledged SPARQL queries.
 pub struct QueryAssembler;
@@ -72,5 +78,69 @@ impl QueryAssembler {
             snippets.extend(GENERAL_SNIPPETS);
         }
         Self::assemble_query(&DEFAULT_PREFIXES.into(), &snippets)
+    }
+
+    /// Construct a custom SPARQL query based of query inserted by the user in the UI(query_menu)
+    pub fn assemble_custom_query(user_query: &str) -> String {
+
+        let vars: HashSet<&str> = VAR_REGEX
+            .find_iter(user_query)
+            .map(|m| m.as_str())
+            .collect();
+
+        let type_finding = vars
+            .iter()
+            .map(|v| format!("OPTIONAL {{ {} rdf:type ?{}_type }}", v, v.replace(['?', '$'], "")))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let construct_types = vars
+            .iter()
+            .map(|v| format!("{} rdf:type ?{}_type .", v, v.replace(['?', '$'], "")))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let filter_var = vars
+            .iter()
+            .map(|v| format!("?s = {0} || ?p = {0} || ?o = {0}", v))
+            .collect::<Vec<_>>()
+            .join(" || ");
+
+        let prefixes = DEFAULT_PREFIXES
+            .iter()
+            .map(|item| format!("PREFIX {item}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        format!(
+            r#"
+            {}
+            CONSTRUCT {{
+                ?s ?p ?o .
+                {}
+            }}
+            WHERE {{
+                GRAPH <{{GRAPH_IRI}}> {{
+                    {{  
+                        ?s a owl:Ontology .
+                        ?s ?p ?o .
+                        BIND(owl:Ontology AS ?s_type)
+                    }}
+                    UNION
+                    {{
+                        {{ {} }}
+
+                        {}
+                        
+                        ?s ?p ?o .
+                        FILTER({})
+                        OPTIONAL {{ ?s rdf:type ?s_type }}
+                        OPTIONAL {{ FILTER(isIRI(?o)) ?o rdf:type ?o_type }}
+                    }}
+                }}
+            }}
+            "#,
+            prefixes, construct_types, user_query, type_finding, filter_var
+        )
     }
 }
