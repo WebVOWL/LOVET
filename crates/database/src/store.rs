@@ -37,11 +37,12 @@ pub struct VOWLGrapherStore {
 impl VOWLGrapherStore {
     /// Create a new database instance.
     pub fn new(session: Store) -> Self {
+        let max_upload_size = VOWLGRAPHER_ENVIRONMENT.max_input_size_bytes.0;
         Self {
             session,
             user_id: None,
             upload_handle: None,
-            upload_limit: Mutex::new(UploadLimit::Unlimited),
+            upload_limit: Mutex::new(UploadLimit::new(max_upload_size)),
         }
     }
 
@@ -400,6 +401,12 @@ impl VOWLGrapherStore {
             let (bytes, hinted_format, next_base) =
                 match self.fetch_import_source(&client, &resolved).await {
                     Ok(source) => source,
+                    Err(
+                        err @ VOWLGrapherStoreError {
+                            inner: VOWLGrapherStoreErrorKind::UploadLimitExceeded(_),
+                            ..
+                        },
+                    ) => return Err(err),
                     Err(err) => {
                         warn!("Skipping failed import fetch '{resolved}': {err}");
                         warnings.push(err.into());
@@ -459,10 +466,9 @@ impl VOWLGrapherStore {
                 let file_size = tokio::fs::metadata(&path).await?.len();
                 let mut limit = self.upload_limit.lock().await;
                 if !limit.try_subtract(file_size) {
-                    return Err(VOWLGrapherStoreErrorKind::ImportResolutionError(format!(
-                        "Importing {url} exceeded file limit."
-                    ))
-                    .into());
+                    return Err(
+                        VOWLGrapherStoreErrorKind::UploadLimitExceeded(url.to_string()).into(),
+                    );
                 }
                 let expected_size = limit
                     .limit()
@@ -487,14 +493,22 @@ impl VOWLGrapherStore {
 
                 let mut size_limit = self.upload_limit.lock().await;
 
-                let mut bytes: Vec<u8> = response.content_length().map_or_else(Vec::new, |len| {
-                    let expected_size = size_limit
-                        .limit()
-                        .map_or(len, |lim| lim.min(len))
-                        .try_into()
-                        .unwrap_or(0);
-                    Vec::with_capacity(expected_size)
-                });
+                let mut bytes: Vec<u8> = response.content_length().map_or_else(
+                    || Ok(Vec::new()),
+                    |len| {
+                        if !size_limit.allows(len) {
+                            return Err(VOWLGrapherStoreErrorKind::UploadLimitExceeded(
+                                url.to_string(),
+                            ));
+                        }
+                        let expected_size = size_limit
+                            .limit()
+                            .map_or(len, |lim| lim.min(len))
+                            .try_into()
+                            .unwrap_or(0);
+                        Ok(Vec::with_capacity(expected_size))
+                    },
+                )?;
 
                 // stream the response so we can ensure that we don't exceed the upload limit
                 while let Some(chunk) = response.chunk().await.map_err(|e| {
@@ -503,9 +517,9 @@ impl VOWLGrapherStore {
                     ))
                 })? {
                     if !size_limit.try_subtract(chunk.len() as u64) {
-                        return Err(VOWLGrapherStoreErrorKind::ImportResolutionError(format!(
-                            "Importing {url} exceeded file limit."
-                        ))
+                        return Err(VOWLGrapherStoreErrorKind::UploadLimitExceeded(
+                            url.to_string(),
+                        )
                         .into());
                     }
                     bytes.extend(chunk);
@@ -637,8 +651,7 @@ impl UploadLimit {
     }
 
     /// Subtracts `amount` bytes from the remaining limit, if it is within the limit.
-    /// Returns `None` if that amount of bytes is within the limit, otherwise,
-    /// returns the limit.
+    /// Returns true if that amount of bytes is within the limit.
     pub const fn try_subtract(&mut self, amount: u64) -> bool {
         let allowed = self.allows(amount);
         if allowed {
