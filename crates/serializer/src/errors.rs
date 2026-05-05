@@ -1,4 +1,6 @@
-use std::{panic::Location, sync::PoisonError};
+#[cfg(debug_assertions)]
+use std::panic::Location;
+use std::sync::PoisonError;
 
 use oxrdf::{BlankNodeIdParseError, IriParseError};
 use rayon::ThreadPoolBuildError;
@@ -106,6 +108,7 @@ pub struct SerializationError {
     /// The contained error type.
     inner: SerializationErrorKind,
     /// The error's location in the source code.
+    #[cfg(debug_assertions)]
     location: &'static Location<'static>,
     /// When the error occurred.
     timestamp: String,
@@ -122,6 +125,7 @@ impl From<SerializationErrorKind> for SerializationError {
     fn from(error: SerializationErrorKind) -> Self {
         Self {
             inner: error,
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -133,6 +137,7 @@ impl<T> From<PoisonError<T>> for SerializationError {
     fn from(value: PoisonError<T>) -> Self {
         Self {
             inner: SerializationErrorKind::LockPoisoned(value.to_string()),
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -144,6 +149,7 @@ impl From<ThreadPoolBuildError> for SerializationError {
     fn from(value: ThreadPoolBuildError) -> Self {
         Self {
             inner: SerializationErrorKind::ThreadPoolFailure(format!("{value}")),
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }

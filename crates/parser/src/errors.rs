@@ -1,9 +1,9 @@
 //! Errors thrown by the parser.
 
-use std::{
-    io::{self},
-    panic::Location,
-};
+#[cfg(debug_assertions)]
+use std::panic::Location;
+
+use std::io::{self};
 
 use horned_owl::error::HornedError;
 
@@ -69,6 +69,7 @@ pub struct VOWLGrapherStoreError {
     /// The contained error type.
     pub inner: VOWLGrapherStoreErrorKind,
     /// The error's location in the source code.
+    #[cfg(debug_assertions)]
     location: &'static Location<'static>,
     /// When the error occurred.
     timestamp: String,
@@ -84,6 +85,7 @@ impl From<String> for VOWLGrapherStoreError {
     fn from(error: String) -> Self {
         Self {
             inner: VOWLGrapherStoreErrorKind::InvalidFileType(error),
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -95,6 +97,7 @@ impl From<HornedError> for VOWLGrapherStoreError {
     fn from(error: HornedError) -> Self {
         Self {
             inner: VOWLGrapherStoreErrorKind::HornedError(Box::new(error)),
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -106,6 +109,7 @@ impl From<SerializerError> for VOWLGrapherStoreError {
     fn from(error: SerializerError) -> Self {
         Self {
             inner: VOWLGrapherStoreErrorKind::SerializerError(Box::new(error)),
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -117,6 +121,7 @@ impl From<IriParseError> for VOWLGrapherStoreError {
     fn from(error: IriParseError) -> Self {
         Self {
             inner: VOWLGrapherStoreErrorKind::IriParseError(Box::new(error)),
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -128,6 +133,7 @@ impl From<LoaderError> for VOWLGrapherStoreError {
     fn from(error: LoaderError) -> Self {
         Self {
             inner: VOWLGrapherStoreErrorKind::LoaderError(Box::new(error)),
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -138,6 +144,7 @@ impl From<VOWLGrapherStoreErrorKind> for VOWLGrapherStoreError {
     fn from(error: VOWLGrapherStoreErrorKind) -> Self {
         Self {
             inner: error,
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -149,6 +156,7 @@ impl From<io::Error> for VOWLGrapherStoreError {
     fn from(error: io::Error) -> Self {
         Self {
             inner: VOWLGrapherStoreErrorKind::IOError(Box::new(error)),
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -159,6 +167,7 @@ impl From<QueryEvaluationError> for VOWLGrapherStoreError {
     fn from(error: QueryEvaluationError) -> Self {
         Self {
             inner: VOWLGrapherStoreErrorKind::QueryEvaluationError(Box::new(error)),
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -169,6 +178,7 @@ impl From<JoinError> for VOWLGrapherStoreError {
     fn from(error: JoinError) -> Self {
         Self {
             inner: VOWLGrapherStoreErrorKind::JoinError(Box::new(error)),
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
@@ -180,6 +190,7 @@ impl From<StorageError> for VOWLGrapherStoreError {
     fn from(error: StorageError) -> Self {
         Self {
             inner: VOWLGrapherStoreErrorKind::StorageError(Box::new(error)),
+            #[cfg(debug_assertions)]
             location: Location::caller(),
             timestamp: get_timestamp(),
         }
