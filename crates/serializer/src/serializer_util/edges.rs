@@ -110,6 +110,7 @@ pub fn insert_edge(
                 new_type,
                 object_term_id,
                 property_term_id,
+                predicate_term_id,
             )?;
             trace!("Inserting: {}", data_buffer.term_index.display_edge(&edge)?);
 
@@ -215,6 +216,7 @@ pub fn update_edges(
                 old_edge.edge_type,
                 new_range_term_id,
                 old_edge.property_term_id,
+                old_edge.predicate_term_id,
             )?;
 
             {
@@ -335,6 +337,7 @@ pub fn upgrade_property_type(
         new_element,
         old_edge.range_term_id,
         old_edge.property_term_id,
+        old_edge.predicate_term_id,
     )?;
 
     {
@@ -557,6 +560,7 @@ pub fn rewrite_property_edge(
         old_edge.edge_type,
         new_object_term_id,
         old_edge.property_term_id,
+        old_edge.predicate_term_id,
     )?;
 
     let label = { data_buffer.edge_label_buffer.write()?.remove(&old_edge) };
@@ -626,6 +630,7 @@ pub fn rewrite_property_edge(
 pub fn has_enumeration_member_edge(
     data_buffer: &SerializationDataBuffer,
     subject_term_id: usize,
+    predicate_term_id: usize,
     object_term_id: usize,
 ) -> Result<bool, SerializationError> {
     let canonical_subject_term_id = canonical_count_term_id(data_buffer, subject_term_id)?;
@@ -637,6 +642,7 @@ pub fn has_enumeration_member_edge(
         ElementType::NoDraw,
         canonical_object_term_id,
         None,
+        predicate_term_id,
     )?;
 
     Ok(data_buffer.edge_buffer.read()?.contains(&candidate))

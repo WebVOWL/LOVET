@@ -50,6 +50,7 @@ pub fn merge_restriction_state(
         self_restriction,
         requires_filler,
         render_mode,
+        predicate_term_id,
     } = &*old_state.read()?;
 
     let mut new_state = restriction_buffer.entry(new_term_id).or_default().write()?;
@@ -62,6 +63,9 @@ pub fn merge_restriction_state(
     }
     if new_state.cardinality.is_none() {
         new_state.cardinality.clone_from(cardinality);
+    }
+    if new_state.predicate_term_id.is_none() {
+        new_state.predicate_term_id = *predicate_term_id;
     }
 
     new_state.self_restriction |= self_restriction;
@@ -400,11 +404,13 @@ pub fn materialize_literal_value_target(
     Ok(subject_term_id)
 }
 
+#[expect(clippy::too_many_arguments)]
 pub fn insert_restriction_edge(
     data_buffer: &SerializationDataBuffer,
     subject_term_id: usize,
-    property_term_id: usize,
+    predicate_term_id: usize,
     object_term_id: usize,
+    property_term_id: usize,
     edge_type: ElementType,
     label: String,
     cardinality: Option<(String, Option<String>)>,
@@ -415,6 +421,7 @@ pub fn insert_restriction_edge(
         edge_type,
         object_term_id,
         Some(property_term_id),
+        predicate_term_id,
     )?;
     {
         data_buffer.edge_buffer.write()?.insert(edge.clone());
@@ -498,6 +505,14 @@ pub fn try_materialize_restriction(
 
     let state = state_lock.read()?;
 
+    let Some(predicate_term_id) = state.predicate_term_id else {
+        let msg = format!(
+            "Failed to materialize restriction for term '{}': missing edge predicate term",
+            data_buffer.term_index.get(restriction_term_id)?
+        );
+        debug!("{msg}");
+        return Err(SerializationErrorKind::SerializationFailed(msg))?;
+    };
     let Some(raw_property_term_id) = state.on_property else {
         debug!(
             "Deferring restriction for term '{}': restriction property not available",
@@ -723,6 +738,7 @@ pub fn try_materialize_restriction(
     let edge = insert_restriction_edge(
         data_buffer,
         subject_term_id,
+        predicate_term_id,
         property_term_id,
         object_term_id,
         restriction_edge_type,

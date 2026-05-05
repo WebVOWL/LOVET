@@ -21,8 +21,16 @@ pub fn create_edge_from_id(
     edge_type: ElementType,
     range_term_id: usize,
     property_term_id: Option<usize>,
+    predicate_term_id: usize,
 ) -> Result<ArcEdge, SerializationError> {
-    let edge = Edge::new(domain_term_id, edge_type, range_term_id, property_term_id).into();
+    let edge = Edge::new(
+        domain_term_id,
+        edge_type,
+        range_term_id,
+        property_term_id,
+        predicate_term_id,
+    )
+    .into();
     trace!("Created new edge: {}", term_index.display_edge(&edge)?);
     Ok(edge)
 }

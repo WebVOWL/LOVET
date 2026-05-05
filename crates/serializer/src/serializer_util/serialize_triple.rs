@@ -311,6 +311,7 @@ fn internal_serialize_triple(
                         state.cardinality = Some(("∀".to_string(), None));
                         state.requires_filler = true;
                         state.render_mode = RestrictionRenderMode::ValuesFrom;
+                        state.predicate_term_id = Some(predicate_term_id);
                     }
 
                     return try_materialize_restriction(data_buffer, triple.subject_term_id);
@@ -456,6 +457,7 @@ fn internal_serialize_triple(
                             .or_default()
                             .write()?;
                         state.cardinality = Some((exact, None));
+                        state.predicate_term_id = Some(predicate_term_id);
                     }
 
                     return try_materialize_restriction(data_buffer, triple.subject_term_id);
@@ -470,6 +472,7 @@ fn internal_serialize_triple(
                             .write()?;
                         state.cardinality = Some((exact.clone(), Some(exact)));
                         state.requires_filler = true;
+                        state.predicate_term_id = Some(predicate_term_id);
                     }
 
                     return try_materialize_restriction(data_buffer, triple.subject_term_id);
@@ -767,6 +770,7 @@ fn internal_serialize_triple(
                                 .write()?;
                             state.self_restriction = true;
                             state.cardinality = Some(("self".to_string(), None));
+                            state.predicate_term_id = Some(predicate_term_id);
                         }
                     }
 
@@ -783,6 +787,7 @@ fn internal_serialize_triple(
                         state.filler = triple.object_term_id;
                         state.cardinality = Some(("value".to_string(), None));
                         state.render_mode = RestrictionRenderMode::ExistingProperty;
+                        state.predicate_term_id = Some(predicate_term_id);
                     }
 
                     return try_materialize_restriction(data_buffer, triple.subject_term_id);
@@ -877,6 +882,7 @@ fn internal_serialize_triple(
                             .or_default()
                             .write()?;
                         state.cardinality = Some((String::new(), Some(max)));
+                        state.predicate_term_id = Some(predicate_term_id);
                     }
 
                     return try_materialize_restriction(data_buffer, triple.subject_term_id);
@@ -894,6 +900,7 @@ fn internal_serialize_triple(
                             Some(cardinality_literal(data_buffer, &triple)?),
                         ));
                         state.requires_filler = true;
+                        state.predicate_term_id = Some(predicate_term_id);
                     }
 
                     return try_materialize_restriction(data_buffer, triple.subject_term_id);
@@ -908,6 +915,7 @@ fn internal_serialize_triple(
                             .or_default()
                             .write()?;
                         state.cardinality = Some((min, Some("*".to_string())));
+                        state.predicate_term_id = Some(predicate_term_id);
                     }
 
                     return try_materialize_restriction(data_buffer, triple.subject_term_id);
@@ -924,6 +932,7 @@ fn internal_serialize_triple(
                             Some("*".to_string()),
                         ));
                         state.requires_filler = true;
+                        state.predicate_term_id = Some(predicate_term_id);
                     }
 
                     return try_materialize_restriction(data_buffer, triple.subject_term_id);
@@ -980,6 +989,7 @@ fn internal_serialize_triple(
                         has_enumeration_member_edge(
                             data_buffer,
                             triple.subject_term_id,
+                            predicate_term_id,
                             materialized_target,
                         )?
                     } else {
@@ -1041,6 +1051,7 @@ fn internal_serialize_triple(
                             .write()?;
                         state.filler = triple.object_term_id;
                         state.requires_filler = true;
+                        state.predicate_term_id = Some(predicate_term_id);
                     }
 
                     return try_materialize_restriction(data_buffer, triple.subject_term_id);
@@ -1063,6 +1074,7 @@ fn internal_serialize_triple(
                             .or_default()
                             .write()?;
                         state.on_property = Some(target);
+                        state.predicate_term_id = Some(predicate_term_id);
                     }
 
                     return try_materialize_restriction(data_buffer, triple.subject_term_id);
@@ -1126,6 +1138,7 @@ fn internal_serialize_triple(
                         state.cardinality = Some(("∃".to_string(), None));
                         state.requires_filler = true;
                         state.render_mode = RestrictionRenderMode::ValuesFrom;
+                        state.predicate_term_id = Some(predicate_term_id);
                     }
 
                     return try_materialize_restriction(data_buffer, triple.subject_term_id);

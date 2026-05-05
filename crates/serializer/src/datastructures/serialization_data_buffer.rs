@@ -15,7 +15,7 @@ use crate::{
 use grapher::prelude::{
     Characteristic, ElementType, GraphDisplayData, GraphMetadata, OwlEdge, OwlType,
 };
-use log::{debug, warn};
+use log::debug;
 use oxrdf::NamedNodeRef;
 use std::{
     collections::{HashMap, HashSet},
@@ -232,6 +232,7 @@ impl SerializationDataBuffer {
                         if edge.edge_type == ElementType::Owl(OwlType::Edge(OwlEdge::InverseOf)) {
                             let Some(property_id) = edge.property_term_id else {
                                 let msg = format!("Edge is missing merged property id\n{edge}");
+                                debug!("{msg}");
                                 failed.push(<SerializationError as Into<ErrorRecord>>::into(
                                     SerializationErrorKind::MissingProperty(msg).into(),
                                 ));
@@ -256,13 +257,14 @@ impl SerializationDataBuffer {
                     display_data
                         .edges
                         .push([*subject_idx, edge_idx, *object_idx]);
+                    iricache.insert(edge.predicate_term_id, edge_idx);
                     if let Some(property_term) = edge.property_term_id {
                         edge_map.insert(
                             (edge.domain_term_id, property_term, edge.range_term_id),
                             edge_idx,
                         );
                     } else {
-                        warn!(
+                        debug!(
                             "edge {} is missing its property term",
                             self.term_index.display_edge(edge)?
                         );
