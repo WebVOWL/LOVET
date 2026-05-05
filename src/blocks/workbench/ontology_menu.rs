@@ -3,6 +3,7 @@ use crate::components::progress_bar::LoadingCircle;
 use crate::components::user_input::internal_sparql::GraphDataContext;
 use crate::components::user_input::internal_sparql::load_graph;
 use crate::components::user_input::stored_ontology::StoredOntology;
+use crate::components::user_input::stored_ontology::list_uploaded_ontologies;
 use crate::components::user_input::stored_ontology::load_stored_ontology;
 use crate::components::{icon::Icon, user_input::file_upload::FileUpload};
 use crate::errors::ClientErrorKind;
@@ -20,6 +21,9 @@ use web_sys::HtmlInputElement;
 #[derive(Copy, Clone)]
 struct ActiveMenuTask(RwSignal<&'static str>);
 
+#[derive(Copy, Clone)]
+struct UploadedListRefresh(RwSignal<u32>);
+
 #[component]
 pub fn SelectStaticInput() -> impl IntoView {
     let error_context = expect_context::<ErrorLogContext>();
@@ -34,7 +38,8 @@ pub fn SelectStaticInput() -> impl IntoView {
     let active_task = expect_context::<ActiveMenuTask>().0;
 
     Effect::new(move || {
-        if active_task.get() != "stored" {
+        let task = active_task.get();
+        if !task.is_empty() && task != "stored" {
             if stored_stage.get_untracked() == Some("Done") {
                 stored_stage.set(None);
             }
@@ -43,8 +48,6 @@ pub fn SelectStaticInput() -> impl IntoView {
             }
         }
     });
-    let selected_ontology: RwSignal<Option<StoredOntology>> =
-        RwSignal::new(Some(StoredOntology::FriendOfAFriend));
 
     let stored_res = LocalResource::new(move || async move {
         if let Some(stored) = selected_ontology.get() {
@@ -178,6 +181,7 @@ pub fn UploadInput() -> impl IntoView {
     let file_input_ref = NodeRef::<leptos::html::Input>::new();
 
     let active_task = expect_context::<ActiveMenuTask>().0;
+    let uploaded_refresh = expect_context::<UploadedListRefresh>().0;
 
     Effect::new(move || {
         if active_task.get() != "file" {
@@ -225,6 +229,7 @@ pub fn UploadInput() -> impl IntoView {
                     spawn_local_scoped_with_cancellation(async move {
                         load_graph(DEFAULT_QUERY.to_string(), true).await;
                         stage.set(Some("Done"));
+                        uploaded_refresh.update(|n| *n += 1);
                     });
                 }
                 Err(e) => {
@@ -256,6 +261,7 @@ pub fn UploadInput() -> impl IntoView {
                     spawn_local_scoped_with_cancellation(async move {
                         load_graph(DEFAULT_QUERY.to_string(), true).await;
                         stage.set(Some("Done"));
+                        uploaded_refresh.update(|n| *n += 1);
                     });
                 }
                 Err(e) => {
@@ -564,9 +570,156 @@ pub fn Sparql() -> impl IntoView {
 }
 
 #[component]
+pub fn UploadedOntology() -> impl IntoView {
+    let error_context = expect_context::<ErrorLogContext>();
+    let GraphDataContext {
+        active_graph_name, ..
+    } = expect_context::<GraphDataContext>();
+
+    let active_task = expect_context::<ActiveMenuTask>().0;
+    let refresh = expect_context::<UploadedListRefresh>().0;
+
+    let uploaded_stage: RwSignal<Option<&'static str>> = RwSignal::new(None);
+    let selected_iri: RwSignal<Option<String>> = RwSignal::new(None);
+    let select_ref = NodeRef::<leptos::html::Select>::new();
+
+    Effect::new(move || {
+        if active_task.get() != "uploaded" {
+            if uploaded_stage.get_untracked() == Some("Done") {
+                uploaded_stage.set(None);
+            }
+            if selected_iri.get_untracked().is_some() {
+                selected_iri.set(None);
+            }
+            if let Some(el) = select_ref.get() {
+                el.set_value("");
+            }
+        }
+    });
+
+    let list_res = LocalResource::new(move || {
+        let _ = refresh.get();
+        async move { list_uploaded_ontologies().await }
+    });
+
+    let load_res = LocalResource::new(move || async move {
+        if let Some(iri) = selected_iri.get() {
+            active_task.set("uploaded");
+            uploaded_stage.set(Some("Loading"));
+            active_graph_name.set(iri);
+            uploaded_stage.set(Some("Serializing"));
+            load_graph(DEFAULT_QUERY.to_string(), true).await;
+            uploaded_stage.set(Some("Done"));
+        }
+    });
+
+    let on_select = move |ev: Event| {
+        let target: HtmlInputElement = event_target::<HtmlInputElement>(&ev);
+        let value = target.value();
+        if value.is_empty() {
+            return;
+        }
+        selected_iri.set(Some(value));
+    };
+
+    view! {
+        <div class="my-2">
+            <label class="block mb-1">"Previously Uploaded:"
+                <button
+                    class="ml-1 text-xs text-gray-500 hover:text-gray-800"
+                    title="Refresh list"
+                    on:click=move |_| { refresh.update(|n| *n += 1); }
+                >
+                    <Icon class="inline" icon=icondata::AiReloadOutlined />
+                </button>
+            </label>
+            <Suspense fallback=move || view! { <p class="text-xs text-gray-500">"Loading list…"</p> }>
+                {move || Suspend::new(async move {
+                    match list_res.await {
+                        Ok(entries) if entries.is_empty() => {
+                            view! {
+                                <p class="text-xs italic text-gray-400">
+                                    "No uploaded ontologies yet."
+                                </p>
+                            }.into_any()
+                        }
+                        Ok(entries) => {
+                            view! {
+                                <select
+                                    node_ref=select_ref
+                                    class="p-1 w-full text-sm bg-gray-200 rounded border-b-0"
+                                    on:change=on_select
+                                >
+                                    <option value="">
+                                        "Select an uploaded ontology"
+                                    </option>
+                                    {entries
+                                        .into_iter()
+                                        .map(|e| {
+                                            let iri = e.graph_iri.clone();
+                                            view! {
+                                                <option value=iri>{e.label}</option>
+                                            }
+                                        })
+                                        .collect_view()}
+                                </select>
+                            }.into_any()
+                        }
+                        Err(e) => {
+                            error_context.extend(e.records);
+                            view! {
+                                <p class="text-xs text-red-500">
+                                    "Failed to load list."
+                                </p>
+                            }.into_any()
+                        }
+                    }
+                })}
+            </Suspense>
+
+            <Suspense fallback=move || {
+                view! { <LoadingCircle /> }
+            }>
+                {move || Suspend::new(async move {
+                    load_res.await;
+                })}
+            </Suspense>
+            {move || {
+                match uploaded_stage.get() {
+                    Some("Done") => {
+                        view! {
+                            <p class="mt-1 text-sm font-bold text-center">
+                                "Loading done"
+                            </p>
+                        }
+                            .into_any()
+                    }
+                    Some(stage) => {
+                        view! {
+                            <p class="mt-1 text-sm text-center">
+                                <span class="inline-flex relative items-center">
+                                    <span>{stage}</span>
+                                    <span class="absolute left-full text-left loading-dots-anim">
+                                        "......"
+                                    </span>
+                                </span>
+                            </p>
+                        }
+                            .into_any()
+                    }
+                    None => ().into_any(),
+                }
+            }}
+        </div>
+    }
+}
+
+#[component]
 pub fn OntologyMenu() -> impl IntoView {
     let active_task = ActiveMenuTask(RwSignal::new(""));
     provide_context(active_task);
+    let refresh = UploadedListRefresh(RwSignal::new(0));
+    provide_context(refresh);
 
     view! {
         <style>
@@ -588,7 +741,8 @@ pub fn OntologyMenu() -> impl IntoView {
         <WorkbenchMenuItems title="Load Ontology">
             <SelectStaticInput />
             <UploadInput />
-            <Sparql />
+            <UploadedOntology />
+            //<Sparql />
             <FetchData />
         </WorkbenchMenuItems>
     }
