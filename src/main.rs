@@ -37,7 +37,6 @@ async fn main() -> std::io::Result<()> {
         let leptos_options = &conf.leptos_options;
         let site_root = &leptos_options.site_root;
 
-
         App::new()
             .app_data(web::PayloadConfig::new(1024 * 1024 * 1024))
             .app_data(web::FormConfig::default().limit(1024 * 1024 * 1024))
@@ -54,7 +53,7 @@ async fn main() -> std::io::Result<()> {
                         <html class=("dark", move || { *is_dark.read() }) lang="en">
                             <head>
                                 <meta charset="utf-8" />
-                                <meta description="WebVOWL rebuilt from stratch with a strong focus on performance and scalability" />
+                                <meta description="A new VOWL-based ontology visualization tool designed with performance, extensibility, and usability in mind." />
                                 <meta
                                     name="viewport"
                                     content="width=device-width, initial-scale=1"
@@ -73,9 +72,10 @@ async fn main() -> std::io::Result<()> {
             })
             .service(Files::new("/", site_root.as_ref()))
             .wrap(middleware::Compress::default())
-            .wrap(SessionMiddleware::builder(CookieSessionStore::default(), secret_key.clone())
-                .cookie_secure(!cfg!(debug_assertions))
-                .build()
+            .wrap(
+                SessionMiddleware::builder(CookieSessionStore::default(), secret_key.clone())
+                    .cookie_secure(!cfg!(debug_assertions))
+                    .build(),
             )
             .wrap(
                 middleware::DefaultHeaders::new()

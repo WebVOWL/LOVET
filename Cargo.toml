@@ -28,7 +28,7 @@
             "nikarnik",
             "TheMagzuz",
         ]
-        description="WebVOWL rebuilt from stratch with a strong focus on performance and scalability."
+        description="A new VOWL-based ontology visualization tool designed with performance, extensibility, and usability in mind."
         edition="2024"
         keywords=[
             "force-directed-graph",
