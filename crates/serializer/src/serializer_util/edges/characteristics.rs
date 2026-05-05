@@ -88,6 +88,7 @@ pub fn insert_inverse_of(
     triple: ArcTriple,
 ) -> Result<SerializationStatus, SerializationError> {
     let left_property_raw = triple.subject_term_id;
+    let predicate_term_id = data_buffer.get_predicate(&triple)?;
     let Some(right_property_raw) = triple.object_term_id else {
         let msg = format!(
             "owl:inverseOf triple is missing a target: {}",
@@ -266,6 +267,7 @@ pub fn insert_inverse_of(
             edge_type,
             left_object,
             inverse_property,
+            predicate_term_id,
         )?,
         create_edge_from_id(
             &data_buffer.term_index,
@@ -273,6 +275,7 @@ pub fn insert_inverse_of(
             edge_type,
             left_subject,
             inverse_property,
+            predicate_term_id,
         )?,
     ];
 

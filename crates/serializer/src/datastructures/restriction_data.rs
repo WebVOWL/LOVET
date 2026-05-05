@@ -24,4 +24,8 @@ pub struct RestrictionState {
     pub self_restriction: bool,
     pub requires_filler: bool,
     pub render_mode: RestrictionRenderMode,
+    /// The edge term's corresponding id.
+    ///
+    /// For instance, <http://xmlns.com/foaf/0.1/fundedBy>
+    pub predicate_term_id: Option<usize>,
 }

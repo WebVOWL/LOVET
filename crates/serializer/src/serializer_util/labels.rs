@@ -1,13 +1,14 @@
 //! Functions related to labels of terms.
 
 use fluent_uri::Iri;
-use log::{debug, error, trace};
+use log::{debug, trace};
 use oxrdf::Term;
 use unescape_zero_copy::unescape_default;
 
 use crate::{
-    datastructures::serialization_data_buffer::SerializationDataBuffer, errors::SerializationError,
-    serializer_util::trim_tag_circumfix,
+    datastructures::serialization_data_buffer::SerializationDataBuffer,
+    errors::SerializationError,
+    serializer_util::{fmt_langtag, trim_tag_circumfix},
 };
 
 /// Extract label info from the query solution and store until
@@ -71,16 +72,13 @@ pub fn extract_label(
         };
         let clean_label = unescape_default(&label)
             .map_or_else(|_| label.clone(), |escaped_label| escaped_label.to_string());
-        error!("Debug check label: '{clean_label}'");
 
         if clean_label.is_empty() {
             debug!("Empty label detected for term '{term}'");
         } else {
             trace!(
-                "Inserting {}label '{clean_label}' for term '{term}'",
-                lang_tag_opt
-                    .as_ref()
-                    .map_or_else(String::new, |lang_tag| format!("{lang_tag} "))
+                "Inserting label '{clean_label}' with language-tag '{}' for term '{term}'",
+                fmt_langtag(lang_tag_opt.clone())
             );
             return (Some(clean_label), lang_tag_opt);
         }

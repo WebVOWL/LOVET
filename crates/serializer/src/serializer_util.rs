@@ -13,7 +13,7 @@ use grapher::prelude::{
     ElementType, OwlEdge, OwlNode, OwlType, RdfEdge, RdfType, RdfsNode, RdfsType,
 };
 use heck::ToTitleCase;
-use log::{debug, info, warn};
+use log::{debug, warn};
 
 use oxrdf::{NamedNodeRef, Term, TermRef};
 use vowlgrapher_util::prelude::ErrorRecord;
@@ -307,10 +307,8 @@ pub fn fmt_translated_metadata_content(
     for content_term_id in content {
         let term = term_index.get(*content_term_id)?;
         let term_str = get_term_string(&term, DisplayCase::Original, term_cache);
-        info!("{term_str}");
         out.push(term_str.to_string());
     }
-    info!("{out:#?}");
     Ok(out)
 }
 

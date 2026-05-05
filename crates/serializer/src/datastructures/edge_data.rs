@@ -20,8 +20,12 @@ pub struct Edge {
     ///
     /// Also called the "target".
     pub range_term_id: usize,
-    /// The property.
+    /// The property. Used for inverse edges
     pub property_term_id: Option<usize>,
+    /// The edge term's corresponding id.
+    ///
+    /// For instance, <http://xmlns.com/foaf/0.1/fundedBy>
+    pub predicate_term_id: usize,
 }
 
 impl Edge {
@@ -30,12 +34,14 @@ impl Edge {
         edge_type: ElementType,
         range_term_id: usize,
         property_term_id: Option<usize>,
+        predicate_term_id: usize,
     ) -> Self {
         Self {
             domain_term_id,
             edge_type,
             range_term_id,
             property_term_id,
+            predicate_term_id,
         }
     }
 }
@@ -109,11 +115,13 @@ mod tests {
         // Create two edges with swapped subject and object
         let x = 1;
         let y = 2;
+        let z = 3;
         let edge1 = Edge {
             domain_term_id: x,
             edge_type: ElementType::Owl(OwlType::Edge(OwlEdge::DisjointWith)),
             range_term_id: y,
             property_term_id: None,
+            predicate_term_id: z,
         };
 
         let edge2 = Edge {
@@ -121,6 +129,7 @@ mod tests {
             edge_type: ElementType::Owl(OwlType::Edge(OwlEdge::DisjointWith)),
             range_term_id: x,
             property_term_id: None,
+            predicate_term_id: z,
         };
 
         // Test that they are equal
@@ -146,12 +155,14 @@ mod tests {
         // Create two edges with swapped subject and object for a non-symmetric relation
         let x = 1;
         let y = 2;
+        let z = 3;
         let prop1 = 3;
         let edge1 = Edge {
             domain_term_id: x,
             edge_type: ElementType::Owl(OwlType::Edge(OwlEdge::ObjectProperty)),
             range_term_id: y,
             property_term_id: Some(prop1),
+            predicate_term_id: z,
         };
 
         let edge2 = Edge {
@@ -159,6 +170,7 @@ mod tests {
             edge_type: ElementType::Owl(OwlType::Edge(OwlEdge::ObjectProperty)),
             range_term_id: x,
             property_term_id: Some(prop1),
+            predicate_term_id: z,
         };
 
         // Test that they are NOT equal
