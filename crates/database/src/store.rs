@@ -348,7 +348,7 @@ impl VOWLGrapherStore {
     /// Inserts a file into the store.
     ///
     /// Files are automatically parsed.
-    /// 
+    ///
     /// If a graph with the same name already exists, it is replaced.
     ///
     /// # Errors

@@ -597,12 +597,12 @@ pub fn UploadedOntology() -> impl IntoView {
         }
     });
 
-    let list_res = LocalResource::new(move || {
+    let list_ontologies = LocalResource::new(move || {
         let _ = refresh.get();
         async move { list_uploaded_ontologies().await }
     });
 
-    let load_res = LocalResource::new(move || async move {
+    let load_uploaded_ontology = LocalResource::new(move || async move {
         if let Some(iri) = selected_iri.get() {
             active_task.set("uploaded");
             uploaded_stage.set(Some("Loading"));
@@ -635,7 +635,7 @@ pub fn UploadedOntology() -> impl IntoView {
             </label>
             <Suspense fallback=move || view! { <p class="text-xs text-gray-500">"Loading list…"</p> }>
                 {move || Suspend::new(async move {
-                    match list_res.await {
+                    match list_ontologies.await {
                         Ok(entries) if entries.is_empty() => {
                             view! {
                                 <p class="text-xs italic text-gray-400">
@@ -681,7 +681,7 @@ pub fn UploadedOntology() -> impl IntoView {
                 view! { <LoadingCircle /> }
             }>
                 {move || Suspend::new(async move {
-                    load_res.await;
+                    load_uploaded_ontology.await;
                 })}
             </Suspense>
             {move || {
