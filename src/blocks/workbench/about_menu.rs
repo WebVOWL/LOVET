@@ -15,7 +15,7 @@ pub fn VOWLGrapherDesc() -> impl IntoView {
             </a>
             <a
                 class="text-2xl transition"
-                href="mailto:cs-25-dat-7-03@student.aau.dk"
+                href="mailto:vowlgrapher@gmail.com"
             >
                 <Icon icon=icondata::IoMail />
             // TODO - Insert the email we can be contacted on.
