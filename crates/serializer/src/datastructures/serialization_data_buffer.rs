@@ -545,7 +545,6 @@ impl SerializationDataBuffer {
                     },
                 );
                     debug!("{msg}");
-                    failed.push(SerializationErrorKind::SerializationWarning(msg).into());
                 }
             }
         }
