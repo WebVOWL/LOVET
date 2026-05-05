@@ -143,7 +143,7 @@ impl VOWLGrapherStore {
                 })?;
 
                 debug!(
-                    "Loaded {} quad in {} s",
+                    "Loaded {} quads in {} s",
                     temp_graph_name,
                     Instant::now()
                         .checked_duration_since(start_time)
