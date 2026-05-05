@@ -211,7 +211,7 @@ impl GraphMetadataBuffer {
                         .map_or_else(|e| e.to_string(), |term| term.to_string()),
                 )?;
                 for item in content {
-                    writeln!(f, "\t\t\t\t{item}")?;
+                    writeln!(f, "\t{item}")?;
                 }
             }
         }
