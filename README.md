@@ -1,6 +1,43 @@
 # VOWLGrapher: WebVOWL Reimagined
 
-This branch tracks development of VOWLGrapher, which is a total rewrite of WebVOWL in Rust.
+A new VOWL-based ontology visualization tool designed with performance, extensibility, and usability in mind.
+
+## Features
+
+### Visualization
+- Visualizes OWL, RDFS, RDF, and Dublin Core
+- Parallellized force-directed graph simulation using the Barnes-Hut algorithm
+- Hardware-accelerated rendering
+
+### Filtering
+- Interactive, type-based filtering supporting all constructs visualized. 
+
+### Custom SPARQL queries
+
+> [!NOTE]
+> Queries are currently restricted to variables `?s ?p ?o`
+
+- Query the loaded graph and visualize the result
+- Fetch and visualize data from external SPARQL endpoints
+
+### Loading / Exporting
+- Load ontologies from local file upload, URL, and SPARQL endpoints
+  - Including optional recursive handling of`owl:imports`
+- Supports loading and exporting to:
+    - OWL
+    - OWL Functional Syntax, 
+    - OWL/XML, 
+    - RDF/XML, 
+    - Turtle, 
+    - N-Triples, 
+    - N-Quads, 
+    - TriG, 
+    - JSON-LD, 
+    - N3
+
+## Benchmarks
+Pending
+
 
 ## Run using Docker
 
@@ -56,4 +93,4 @@ The following environment variables are available:
 |              Variable              |  Type   |    Default value    | Description                                                        |
 | :--------------------------------: | :-----: | :-----------------: | :----------------------------------------------------------------- |
 | `VOWLGRAPHER_MAX_INPUT_SIZE_BYTES` |  Bytes  | `52,428,800` (50MB) | The maximum allowed size, in bytes, of any input into VOWLGrapher. |
-|   `VOWLGRAPHER_RESOLVE_IMPORTS`    | Boolean |       `true`        | Whether owl:imports should be fetched and loaded recursively.      |
+|   `VOWLGRAPHER_RESOLVE_IMPORTS`    | Boolean |       `true`        | Whether `owl:imports` should be fetched and loaded recursively.      |
