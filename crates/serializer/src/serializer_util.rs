@@ -13,7 +13,7 @@ use grapher::prelude::{
     ElementType, OwlEdge, OwlNode, OwlType, RdfEdge, RdfType, RdfsNode, RdfsType,
 };
 use heck::ToTitleCase;
-use log::{info, warn};
+use log::{debug, info, warn};
 
 use oxrdf::{NamedNodeRef, Term, TermRef};
 use vowlgrapher_util::prelude::ErrorRecord;
@@ -280,7 +280,6 @@ pub fn get_term_string(
     term: &ArcTerm,
     case: DisplayCase,
     term_cache: &mut HashMap<ArcTerm, Arc<String>>,
-    failed: &mut Vec<ErrorRecord>,
 ) -> Arc<String> {
     term_cache
         .entry(term.clone())
@@ -290,7 +289,7 @@ pub fn get_term_string(
             } else {
                 let msg =
                     format!("Failed to extract metadata label for term '{term}'. Using default");
-                failed.push(SerializationErrorKind::SerializationWarning(msg).into());
+                debug!("{msg}");
                 let fallback = trim_tag_circumfix(&key.to_string());
                 case.fmt_string(fallback.as_str()).into()
             }
@@ -303,12 +302,11 @@ pub fn fmt_translated_metadata_content(
     content: &MetadataContent,
     term_index: &TermIndex,
     term_cache: &mut HashMap<ArcTerm, Arc<String>>,
-    failed: &mut Vec<ErrorRecord>,
 ) -> Result<Vec<String>, SerializationError> {
     let mut out = Vec::with_capacity(content.len());
     for content_term_id in content {
         let term = term_index.get(*content_term_id)?;
-        let term_str = get_term_string(&term, DisplayCase::Original, term_cache, failed);
+        let term_str = get_term_string(&term, DisplayCase::Original, term_cache);
         info!("{term_str}");
         out.push(term_str.to_string());
     }
