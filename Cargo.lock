@@ -8283,8 +8283,6 @@ name = "vowlgrapher-sparql-queries"
 version = "0.1.0-alpha"
 dependencies = [
  "grapher",
- "once_cell",
- "regex",
  "vowlgrapher-util",
 ]
 
