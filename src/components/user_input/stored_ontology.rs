@@ -11,6 +11,32 @@ use vowlgrapher_util::prelude::manage_user_id;
 
 #[derive(
     Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    rkyv::Archive,
+    rkyv::Deserialize,
+    rkyv::Serialize,
+    serde::Deserialize,
+    serde::Serialize,
+)]
+pub struct UploadedOntologyEntry {
+    pub graph_iri: String,
+    pub label: String,
+}
+
+impl UploadedOntologyEntry {
+    pub fn new(graph_iri: String) -> Self {
+        let label = graph_iri
+            .rsplit_once(":graph:")
+            .map_or_else(|| graph_iri.clone(), |(_, value)| value.to_string());
+
+        Self { graph_iri, label }
+    }
+}
+
+#[derive(
+    Debug,
     Copy,
     Clone,
     PartialEq,
@@ -122,4 +148,14 @@ pub async fn load_stored_ontology(
 
     let warnings = store.insert_file(path, false).await?;
     Ok(warnings)
+}
+
+#[server(input = Rkyv, output = Rkyv)]
+pub async fn list_uploaded_ontologies() -> Result<Vec<UploadedOntologyEntry>, VOWLGrapherError> {
+    let store = VOWLGrapherStore::new_for_user(manage_user_id().await?);
+    let graph_names = store.list_uploaded_graph_names();
+    Ok(graph_names
+        .into_iter()
+        .map(UploadedOntologyEntry::new)
+        .collect())
 }

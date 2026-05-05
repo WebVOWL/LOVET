@@ -5,8 +5,9 @@ use rdf_fusion::execution::results::QueryResults;
 use rdf_fusion::model::{NamedNodeRef, Quad};
 use rdf_fusion::store::Store;
 use reqwest::{Client, Url};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
+use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 use std::time::Instant;
 use strum::IntoEnumIterator;
@@ -22,6 +23,11 @@ use vowlgrapher_serializer::prelude::GraphDisplayDataSolutionSerializer;
 use vowlgrapher_util::prelude::{DataType, ErrorRecord, VOWLGRAPHER_ENVIRONMENT, VOWLGrapherError};
 
 static GLOBAL_STORE: std::sync::OnceLock<Store> = std::sync::OnceLock::new();
+static UPLOADED_GRAPH_REGISTRY: OnceLock<RwLock<HashMap<String, Vec<String>>>> = OnceLock::new();
+
+fn uploaded_graph_registry() -> &'static RwLock<HashMap<String, Vec<String>>> {
+    UPLOADED_GRAPH_REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
+}
 
 /// The graph database.
 pub struct VOWLGrapherStore {
@@ -60,12 +66,39 @@ impl VOWLGrapherStore {
 
     /// Returns the unique graph name for a given filename and user.
     pub fn get_graph_name(&self, filename: &str) -> String {
+        if filename.starts_with("urn:vowlgrapher:") {
+            return filename.to_string();
+        }
+
         let filename = filename.replace(' ', "_").replace(['(', ')', '[', ']'], "");
 
         self.user_id.as_ref().map_or_else(
             || format!("urn:vowlgrapher:graph:{filename}"),
             |uid| format!("urn:vowlgrapher:user:{uid}:graph:{filename}"),
         )
+    }
+
+    /// Records a graph as uploaded for the current user.
+    pub fn register_uploaded_graph(&self, graph_name: &str) {
+        let key = self.user_id.clone().unwrap_or_default();
+        let mut registry = uploaded_graph_registry()
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let graphs = registry.entry(key).or_default();
+        if !graphs.iter().any(|existing| existing == graph_name) {
+            graphs.push(graph_name.to_string());
+        }
+        drop(registry);
+    }
+
+    /// Lists uploaded graph IRIs stored for the current user.
+    pub fn list_uploaded_graph_names(&self) -> Vec<String> {
+        let key = self.user_id.clone().unwrap_or_default();
+        let registry = uploaded_graph_registry()
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        registry.get(&key).cloned().unwrap_or_default()
     }
 
     /// Executes a SPARQL query and serializes the result.
@@ -315,6 +348,8 @@ impl VOWLGrapherStore {
     /// Inserts a file into the store.
     ///
     /// Files are automatically parsed.
+    /// 
+    /// If a graph with the same name already exists, it is replaced.
     ///
     /// # Errors
     /// Returns an error if the file fails to parse or
@@ -347,6 +382,8 @@ impl VOWLGrapherStore {
         info!("Loading graph '{graph_name}' into database...");
         let start_time = Instant::now();
 
+        let graph_ref = NamedNodeRef::new(&graph_name)?;
+        self.session.clear_graph(graph_ref).await?;
         self.session.extend(quads).await?;
         info!(
             "Loaded {} quads in {} s",
@@ -356,6 +393,8 @@ impl VOWLGrapherStore {
                 .unwrap_or(Duration::new(0, 0))
                 .as_secs_f32()
         );
+
+        self.register_uploaded_graph(&graph_name);
 
         self.upload_handle = None;
         Ok((loaded_format, warnings))
