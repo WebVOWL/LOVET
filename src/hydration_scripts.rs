@@ -8,7 +8,6 @@ use std::{path::PathBuf, sync::OnceLock};
 /// Inserts hydration scripts that add interactivity to your server-rendered HTML.
 ///
 /// This should be included in the `<head>` of your application shell.
-#[allow(dead_code)]
 #[component]
 #[expect(
     clippy::needless_pass_by_value,
