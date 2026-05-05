@@ -5505,7 +5505,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "perfdebugger"
-version = "0.1.0-alpha"
+version = "0.2.0-beta"
 dependencies = [
  "env_logger",
  "grapher",
@@ -8182,7 +8182,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vowlgrapher"
-version = "0.1.0-alpha"
+version = "0.2.0-beta"
 dependencies = [
  "actix-files",
  "actix-session",
@@ -8227,7 +8227,7 @@ dependencies = [
 
 [[package]]
 name = "vowlgrapher-database"
-version = "0.1.0-alpha"
+version = "0.2.0-beta"
 dependencies = [
  "anyhow",
  "env_logger",
@@ -8256,7 +8256,7 @@ dependencies = [
 
 [[package]]
 name = "vowlgrapher-parser"
-version = "0.1.0-alpha"
+version = "0.2.0-beta"
 dependencies = [
  "env_logger",
  "futures",
@@ -8273,7 +8273,7 @@ dependencies = [
 
 [[package]]
 name = "vowlgrapher-serializer"
-version = "0.1.0-alpha"
+version = "0.2.0-beta"
 dependencies = [
  "env_logger",
  "fluent-uri",
@@ -8296,7 +8296,7 @@ dependencies = [
 
 [[package]]
 name = "vowlgrapher-sparql-queries"
-version = "0.1.0-alpha"
+version = "0.2.0-beta"
 dependencies = [
  "grapher",
  "vowlgrapher-util",
@@ -8304,7 +8304,7 @@ dependencies = [
 
 [[package]]
 name = "vowlgrapher-util"
-version = "0.1.0-alpha"
+version = "0.2.0-beta"
 dependencies = [
  "actix-session",
  "bytesize",
