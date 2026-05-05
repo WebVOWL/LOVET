@@ -71,7 +71,10 @@ impl VOWLGrapherStore {
         query: String,
         graph_name: Option<String>,
     ) -> Result<(GraphDisplayData, Option<VOWLGrapherError>), VOWLGrapherError> {
-        debug!("Querying with graph_name: {graph_name:#?}");
+        debug!(
+            "Querying with graph_name: {}",
+            graph_name.clone().unwrap_or_else(|| "None".to_string())
+        );
         let user_query = graph_name.map_or_else(
             || query.replace("GRAPH <{GRAPH_IRI}>", ""),
             |name| {
@@ -406,7 +409,7 @@ impl VOWLGrapherStore {
         root_base: ImportBase,
     ) -> Result<(Vec<Quad>, Option<VOWLGrapherError>), VOWLGrapherStoreError> {
         if !VOWLGRAPHER_ENVIRONMENT.resolve_imports {
-            debug!("Import resolution disabled via VOWLGRAPHER_RESOLVE_IMPORTS");
+            info!("Import resolution disabled via VOWLGRAPHER_RESOLVE_IMPORTS");
             return Ok((root_quads, None));
         }
 
@@ -570,13 +573,11 @@ enum ImportBase {
 
 impl ImportBase {
     fn from_path(path: &Path) -> Self {
-        Url::from_file_path(path)
-            .map(Self::Url)
-            .unwrap_or(Self::Unknown)
+        Url::from_file_path(path).map_or(Self::Unknown, Self::Url)
     }
 
     fn from_user_input(input: &str) -> Self {
-        Url::parse(input).map(Self::Url).unwrap_or(Self::Unknown)
+        Url::parse(input).map_or(Self::Unknown, Self::Url)
     }
 
     fn resolve(&self, import_iri: &str) -> Result<Url, VOWLGrapherStoreError> {

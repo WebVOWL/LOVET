@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use bytesize::ByteSize;
 use leptos::prelude::*;
 use leptos::server_fn::codec::Rkyv;
-use log::warn;
+use log::{info, warn};
 
 /// Server-side access to environment variables.
 #[cfg(feature = "server")]
@@ -69,7 +69,7 @@ impl VOWLGrapherEnviron {
     pub fn new() -> Self {
         let max_input_size_bytes =
             Self::parse_environment("VOWLGRAPHER_MAX_INPUT_SIZE_BYTES", ByteSize::mb(50));
-        let resolve_imports = Self::parse_environment("VOWLGRAPHER_RESOLVE_IMPORTS", true);
+        let resolve_imports = Self::parse_environment("VOWLGRAPHER_RESOLVE_IMPORTS", false);
         Self {
             max_input_size_bytes,
             resolve_imports,
@@ -83,13 +83,15 @@ impl VOWLGrapherEnviron {
         T: FromStr + ToString,
         <T as FromStr>::Err: Debug,
     {
-        var(key.to_string())
+        let mut is_default = false;
+        let value = var(key.to_string())
             .unwrap_or_else(|_| {
                 warn!(
                     "Did not find variable {} in environment. Using default '{}'",
                     key.to_string(),
                     default.to_string()
                 );
+                is_default = true;
                 default.to_string()
             })
             .parse::<T>()
@@ -100,8 +102,17 @@ impl VOWLGrapherEnviron {
                     e,
                     default.to_string()
                 );
+                is_default = true;
                 default
-            })
+            });
+        if !is_default {
+            info!(
+                "Found variable {} with value '{}' in environment",
+                key.to_string(),
+                value.to_string()
+            );
+        }
+        value
     }
 }
 

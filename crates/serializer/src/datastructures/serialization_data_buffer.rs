@@ -1,12 +1,22 @@
 use crate::{
     datastructures::{
-        ArcEdge, ArcLockRestrictionState, ArcTriple, graph_metadata_buffer::GraphMetadataBuffer,
-        index::TermIndex,
+        ArcEdge, ArcLockRestrictionState, ArcTerm, ArcTriple, DocumentBase, TermID,
+        graph_metadata_buffer::GraphMetadataBuffer, index::TermIndex,
     },
     errors::{SerializationError, SerializationErrorKind},
+    serializer_util::{
+        fmt_langtag, named_node_to_term, translate_metadata_content, trim_tag_circumfix,
+    },
+    vocab::{
+        dcmi::{dc, dcterms},
+        owl, rdfs,
+    },
 };
-use grapher::prelude::{Characteristic, ElementType, GraphDisplayData, OwlEdge, OwlType};
-use log::debug;
+use grapher::prelude::{
+    Characteristic, ElementType, GraphDisplayData, GraphMetadata, OwlEdge, OwlType,
+};
+use log::{debug, warn};
+use oxrdf::NamedNodeRef;
 use std::{
     collections::{HashMap, HashSet},
     fmt::{Display, Formatter},
@@ -25,19 +35,19 @@ pub struct SerializationDataBuffer {
     /// Maps terms to integer ids and vice-versa.
     ///
     /// Reduces memory usage and allocations.
-    pub term_index: TermIndex,
+    pub term_index: Arc<TermIndex>,
     /// Stores all resolved node elements.
     ///
     /// The key is a term's corresponding id.
     ///
     /// The value is a term's type, e.g., "Owl Class".
-    pub node_element_buffer: Arc<RwLock<HashMap<usize, ElementType>>>,
+    pub node_element_buffer: Arc<RwLock<HashMap<TermID, ElementType>>>,
     /// Stores all resolved edge elements.
     ///
     /// The key is a term's corresponding id.
     ///
-    /// The value is a term's type, e.g., "Owl Class".
-    pub edge_element_buffer: Arc<RwLock<HashMap<usize, ElementType>>>,
+    /// The value is a term's type, e.g., "Object Properrty".
+    pub edge_element_buffer: Arc<RwLock<HashMap<TermID, ElementType>>>,
     /// Keeps track of edges that should point to a node different
     /// from their definition.
     ///
@@ -46,39 +56,39 @@ pub struct SerializationDataBuffer {
     /// The key is the range term of an edge triple, translated to that term's corresponding id.
     ///
     /// The value is the domain term of an edge triple, translated to that term's corresponding id.
-    pub edge_redirection: Arc<RwLock<HashMap<usize, usize>>>,
+    pub edge_redirection: Arc<RwLock<HashMap<TermID, TermID>>>,
     /// Maps a term's corresponding id to the set of edges that include it.
     ///
     /// Used to remap edges when nodes are merged.
-    pub edges_include_map: Arc<RwLock<HashMap<usize, HashSet<ArcEdge>>>>,
+    pub edges_include_map: Arc<RwLock<HashMap<TermID, HashSet<ArcEdge>>>>,
     /// Canonical synthesized owl:Thing node per resolved domain.
     ///
     /// This lets structurally-defined ranges like complement/union expressions
     /// collapse to the same owl:Thing node that direct owl:Thing ranges use.
-    pub anchor_thing_map: Arc<RwLock<HashMap<usize, usize>>>,
+    pub anchor_thing_map: Arc<RwLock<HashMap<TermID, TermID>>>,
     /// Partially assembled restriction metadata keyed by the restriction node.
-    pub restriction_buffer: Arc<RwLock<HashMap<usize, ArcLockRestrictionState>>>,
+    pub restriction_buffer: Arc<RwLock<HashMap<TermID, ArcLockRestrictionState>>>,
     #[expect(clippy::type_complexity)]
     /// Final display cardinalities keyed by the concrete edge that will be emitted.
     pub edge_cardinality_buffer: Arc<RwLock<HashMap<ArcEdge, (String, Option<String>)>>>,
     /// Stores the edges of a property, keyed by the property's corresponding id.
-    pub property_edge_map: Arc<RwLock<HashMap<usize, ArcEdge>>>,
+    pub property_edge_map: Arc<RwLock<HashMap<TermID, ArcEdge>>>,
     /// Stores the domains of a property, keyed by the property's corresponding id.
-    pub property_domain_map: Arc<RwLock<HashMap<usize, HashSet<usize>>>>,
+    pub property_domain_map: Arc<RwLock<HashMap<TermID, HashSet<TermID>>>>,
     /// Stores the ranges of a property, keyed by the property's corresponding id.
-    pub property_range_map: Arc<RwLock<HashMap<usize, HashSet<usize>>>>,
+    pub property_range_map: Arc<RwLock<HashMap<TermID, HashSet<TermID>>>>,
     /// Stores declared domains of a property, keyed by the property's corresponding id.
     ///
     /// This is used by owl:inverseOf resolution and should contain only query-level
     /// domain/range evidence, never endpoints inferred from rendered property edges.
-    pub declared_property_domain_map: Arc<RwLock<HashMap<usize, HashSet<usize>>>>,
+    pub declared_property_domain_map: Arc<RwLock<HashMap<TermID, HashSet<TermID>>>>,
     /// Stores declared ranges of a property, keyed by the property's corresponding id.
     ///
     /// This is used by owl:inverseOf resolution and should contain only query-level
     /// domain/range evidence, never endpoints inferred from rendered property edges.
-    pub declared_property_range_map: Arc<RwLock<HashMap<usize, HashSet<usize>>>>,
+    pub declared_property_range_map: Arc<RwLock<HashMap<TermID, HashSet<TermID>>>>,
     /// Stores labels of terms, keyed by the term's corresponding id.
-    pub label_buffer: Arc<RwLock<HashMap<usize, Option<String>>>>,
+    pub label_buffer: Arc<RwLock<HashMap<TermID, Option<String>>>>,
     /// Stores labels of edges, keyed by the edge it belongs to.
     pub edge_label_buffer: Arc<RwLock<HashMap<ArcEdge, Option<String>>>>,
     /// Edges in graph, to avoid duplicates
@@ -86,33 +96,38 @@ pub struct SerializationDataBuffer {
     /// Maps from an edge to its characteristic.
     pub edge_characteristics: Arc<RwLock<HashMap<ArcEdge, HashSet<Characteristic>>>>,
     /// Maps from a node term's corresponding id to its characteristics.
-    pub node_characteristics: Arc<RwLock<HashMap<usize, HashSet<Characteristic>>>>,
+    pub node_characteristics: Arc<RwLock<HashMap<TermID, HashSet<Characteristic>>>>,
     /// Maps from node term's corresponding id to its number of individuals.
-    pub individual_count_buffer: Arc<RwLock<HashMap<usize, u32>>>,
+    pub individual_count_buffer: Arc<RwLock<HashMap<TermID, u32>>>,
     /// Maps from a class term id to the set of canonical individual term ids already counted for it.
-    pub counted_individual_members: Arc<RwLock<HashMap<usize, HashSet<usize>>>>,
+    pub counted_individual_members: Arc<RwLock<HashMap<TermID, HashSet<TermID>>>>,
     /// Stores unresolved triples.
     ///
     /// This is a mapping of a term's corresponding id to the set of triples referencing it.
-    pub unknown_buffer: Arc<RwLock<HashMap<usize, HashSet<ArcTriple>>>>,
+    pub unknown_buffer: Arc<RwLock<HashMap<TermID, HashSet<ArcTriple>>>>,
     /// Stores errors encountered during serialization.
     pub failed_buffer: Arc<RwLock<Vec<ErrorRecord>>>,
     /// The base IRI of the document.
     ///
     /// For instance: `http://purl.obolibrary.org/obo/envo.owl`
-    pub document_base: Arc<RwLock<Option<Arc<String>>>>,
+    pub document_base: Arc<RwLock<Option<DocumentBase>>>,
     /// Data not visualized in the graph.
     pub metadata: GraphMetadataBuffer,
 }
 impl SerializationDataBuffer {
     pub fn new() -> Self {
-        Self::default()
+        let term_index: Arc<TermIndex> = TermIndex::new().into();
+        Self {
+            metadata: GraphMetadataBuffer::new(term_index.clone()),
+            term_index,
+            ..Default::default()
+        }
     }
 
     /// Unpack the predicate term id of the triple.
     ///
     /// Returns an error if the term id is None.
-    pub fn get_predicate(&self, triple: &ArcTriple) -> Result<usize, SerializationError> {
+    pub fn get_predicate(&self, triple: &ArcTriple) -> Result<TermID, SerializationError> {
         match triple.predicate_term_id {
             Some(predicate_term_id) => Ok(predicate_term_id),
             None => Err(SerializationErrorKind::MissingPredicate(
@@ -122,16 +137,24 @@ impl SerializationDataBuffer {
         }
     }
 
-    #[expect(
-        clippy::significant_drop_tightening,
-        reason = "this method clears most buffers and is expected to be called at the end of processing. 
-        Thus, keeping locks longer than necessary doesn't matter"
-    )]
+    /// Unpack the object term id of the triple.
+    ///
+    /// Returns an error if the term id is None.
+    pub fn get_object(&self, triple: &ArcTriple) -> Result<usize, SerializationError> {
+        match triple.object_term_id {
+            Some(object_term_id) => Ok(object_term_id),
+            None => Err(SerializationErrorKind::MissingObject(
+                self.term_index.display_triple(triple)?,
+                "Cannot serialize a triple with a missing object".to_string(),
+            ))?,
+        }
+    }
+
     /// Converts [`self`] into [`GraphDisplayData`].
     ///
     /// Works like [`TryFrom`] except it also returns non-critical errors in [`Result::Ok`].
     pub fn convert_into(
-        &self,
+        self,
     ) -> Result<(GraphDisplayData, Option<VOWLGrapherError>), SerializationError> {
         let mut display_data = GraphDisplayData::new();
         let mut failed: Vec<ErrorRecord> = Vec::new();
@@ -142,6 +165,37 @@ impl SerializationDataBuffer {
         // Maps an RDF term's corresponding id to a [`GraphDisplayData`] index.
         let mut inverse_edge_indices: HashMap<usize, usize> = HashMap::new();
 
+        // Maps an edge in the form of `(subject, verb, object)` to a [`GraphDisplayData`] index.
+        let mut edge_map: HashMap<(usize, usize, usize), usize> = HashMap::new();
+
+        self.convert_graph_data(
+            &mut display_data,
+            &mut failed,
+            &mut iricache,
+            &mut inverse_edge_indices,
+            &mut edge_map,
+        )?;
+        self.convert_metadata(&mut display_data, &mut failed, &iricache)?;
+
+        if failed.is_empty() {
+            Ok((display_data, None))
+        } else {
+            Ok((display_data, Some(failed.into())))
+        }
+    }
+
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "this method runs single-threaded"
+    )]
+    fn convert_graph_data(
+        &self,
+        display_data: &mut GraphDisplayData,
+        failed: &mut Vec<ErrorRecord>,
+        iricache: &mut HashMap<usize, usize>,
+        inverse_edge_indices: &mut HashMap<usize, usize>,
+        edge_map: &mut HashMap<(usize, usize, usize), usize>,
+    ) -> Result<(), SerializationError> {
         let mut label_buffer = self.label_buffer.write()?;
         let mut node_element_buffer = self.node_element_buffer.write()?;
         for (term_id, element) in take(&mut *node_element_buffer) {
@@ -202,6 +256,17 @@ impl SerializationDataBuffer {
                     display_data
                         .edges
                         .push([*subject_idx, edge_idx, *object_idx]);
+                    if let Some(property_term) = edge.property_term_id {
+                        edge_map.insert(
+                            (edge.domain_term_id, property_term, edge.range_term_id),
+                            edge_idx,
+                        );
+                    } else {
+                        warn!(
+                            "edge {} is missing its property term",
+                            self.term_index.display_edge(edge)?
+                        );
+                    }
 
                     if let Some(characteristics) = characteristics {
                         display_data
@@ -270,11 +335,328 @@ impl SerializationDataBuffer {
                 display_data.individual_counts.insert(*idx, count);
             }
         }
+        Ok(())
+    }
 
-        if failed.is_empty() {
-            Ok((display_data, None))
-        } else {
-            Ok((display_data, Some(failed.into())))
+    #[expect(
+        clippy::significant_drop_in_scrutinee,
+        reason = "this method runs single-threaded"
+    )]
+    fn convert_metadata(
+        &self,
+        display_data: &mut GraphDisplayData,
+        failed: &mut Vec<ErrorRecord>,
+        iricache: &HashMap<usize, usize>,
+    ) -> Result<(), SerializationError> {
+        let mut metadata_buffer = GraphMetadata::new();
+
+        metadata_buffer.languages = {
+            let mut lang_buffer = self.metadata.lanuages.write()?;
+            let mut languages = Vec::with_capacity(lang_buffer.len());
+            if lang_buffer.remove(&None) {
+                languages.push(None);
+            }
+            languages.extend(take(&mut *lang_buffer));
+            languages
+        };
+        metadata_buffer.graph_header.document_base = self
+            .document_base
+            .read()?
+            .clone()
+            .map_or_else(String::new, |docbase| docbase.base);
+        metadata_buffer.graph_header.title = {
+            if let Some(docbase) = self.document_base.read()?.clone() {
+                self.extract_header_title(&docbase, failed)?
+            } else {
+                None
+            }
+            .unwrap_or_default()
+        };
+        metadata_buffer.graph_header.description = {
+            if let Some(docbase) = self.document_base.read()?.clone() {
+                self.extract_header_description(&docbase, failed)?
+            } else {
+                None
+            }
+            .unwrap_or_default()
+        };
+        metadata_buffer.graph_header.creator = {
+            if let Some(docbase) = self.document_base.read()?.clone() {
+                self.get_metadata_element(
+                    &docbase,
+                    &[dcterms::CREATOR, dc::CREATOR],
+                    "creator",
+                    failed,
+                )
+                .map(|(_, map)| map)?
+            } else {
+                None
+            }
+            .unwrap_or_default()
+        };
+        metadata_buffer.graph_header.contributor = {
+            if let Some(docbase) = self.document_base.read()?.clone() {
+                self.get_metadata_element(
+                    &docbase,
+                    &[dcterms::CONTRIBUTOR, dc::CONTRIBUTOR],
+                    "creator",
+                    failed,
+                )
+                .map(|(_, map)| map)?
+            } else {
+                None
+            }
+            .unwrap_or_default()
+        };
+        metadata_buffer.graph_header.version_iri = {
+            /// Try getting version iri from version iri buffer
+            fn get_version_iri(
+                self_metadata: &GraphMetadataBuffer,
+                self_term_index: &TermIndex,
+            ) -> Result<Option<String>, SerializationError> {
+                let a = self_metadata
+                    .version_iri
+                    .read()?
+                    .and_then(|version_term_id| {
+                        Some(self_term_index.display_term(version_term_id))
+                    });
+                Ok(a)
+            }
+
+            match self.document_base.read()?.clone() {
+                Some(docbase) => {
+                    // Try getting version iri from version info buffer first
+                    let maybe_version_info = self.get_metadata_element(
+                        &docbase,
+                        &[owl::VERSION_INFO],
+                        "version_info",
+                        failed,
+                    )?;
+                    match maybe_version_info {
+                        (_, Some(version_infos)) => version_infos
+                            .values()
+                            .take(1)
+                            .map(|info_vec| info_vec.first().cloned())
+                            .collect(),
+                        (_, None) => get_version_iri(&self.metadata, &self.term_index)?,
+                    }
+                }
+                None => get_version_iri(&self.metadata, &self.term_index)?,
+            }
+        };
+        metadata_buffer.graph_header.prior_version = {
+            self.metadata
+                .prior_version
+                .read()?
+                .and_then(|prior_version_term_id| {
+                    Some(self.term_index.display_term(prior_version_term_id))
+                })
+        };
+        metadata_buffer.graph_header.incompatible_with = {
+            self.metadata
+                .incompatible_with
+                .read()?
+                .and_then(|incompatible_with_term_id| {
+                    Some(self.term_index.display_term(incompatible_with_term_id))
+                })
+        };
+        metadata_buffer.graph_header.backward_compatible_with = {
+            self.metadata.backward_compatible_with.read()?.and_then(
+                |backward_compatible_with_term_id| {
+                    Some(
+                        self.term_index
+                            .display_term(backward_compatible_with_term_id),
+                    )
+                },
+            )
+        };
+        self.convert_element_metadata(&mut metadata_buffer, iricache, failed)?;
+        display_data.graph_metadata = metadata_buffer;
+        Ok(())
+    }
+
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "this method runs single-threaded"
+    )]
+    fn convert_element_metadata(
+        &self,
+        metadata_buffer: &mut GraphMetadata,
+        iricache: &HashMap<usize, usize>,
+        failed: &mut Vec<ErrorRecord>,
+    ) -> Result<(), SerializationError> {
+        let mut term_cache: HashMap<ArcTerm, Arc<String>> = HashMap::new();
+        let mut get_term_string = |term: ArcTerm| {
+            term_cache
+                .entry(term)
+                .or_insert_with_key(|key| trim_tag_circumfix(&key.to_string()).into())
+                .clone()
+        };
+
+        let mut buffer = self.metadata.element_metadata.write()?;
+        for (term_id, metadata_types) in take(&mut *buffer) {
+            if let Some(term_idx) = iricache.get(&term_id) {
+                for (metadata_term_id, tagged_metadata) in metadata_types {
+                    match self.term_index.get(metadata_term_id) {
+                        Ok(metadata_term) => {
+                            let tagged_metadata_entry = metadata_buffer
+                                .metadata_type
+                                .entry(*term_idx)
+                                .or_default()
+                                .entry(get_term_string(metadata_term))
+                                .or_default();
+                            for (lang_tag, content) in tagged_metadata {
+                                tagged_metadata_entry
+                                    .entry(fmt_langtag(lang_tag))
+                                    .or_insert_with(|| {
+                                        translate_metadata_content(&self.term_index, &content)
+                                    });
+                            }
+                        }
+                        Err(e) => failed.push(e.into()),
+                    }
+                }
+            } else {
+                for metadata_term_id in metadata_types.keys() {
+                    let metadata_term = self.term_index.display_term(*metadata_term_id);
+                    let msg = self.term_index.get(term_id).map_or_else(
+                    |e| {
+                        format!(
+                            "Failed to map metadata term '{metadata_term}': Subject term '{e}' not found in iricache"
+                        )
+                    },
+                    |term| {
+                        format!(
+                            "Failed to map metadata term '{metadata_term}': Subject term '{term}' not found in iricache"
+                        )
+                    },
+                );
+                    debug!("{msg}");
+                    failed.push(SerializationErrorKind::SerializationWarning(msg).into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns the content of an element type from [`GraphMetadataBuffer::element_metadata`].
+    ///
+    /// The content's term ids are translated to term strings.
+    ///
+    /// The content returned is the first found in the `element_types` array.
+    ///
+    /// `element_name` is the name of the `element_type`. Used for error logging.
+    #[expect(clippy::type_complexity)]
+    fn get_metadata_element(
+        &self,
+        document_base: &DocumentBase,
+        element_types: &[NamedNodeRef],
+        element_name: &str,
+        failed: &mut Vec<ErrorRecord>,
+    ) -> Result<(Option<TermID>, Option<HashMap<String, Vec<String>>>), SerializationError> {
+        if let Ok(base_term_id) = self.term_index.get_id(&document_base.base_term) {
+            let maybe_element = self
+                .metadata
+                .element_metadata
+                .read()?
+                .get(&base_term_id)
+                .map_or((Some(base_term_id), None), |metadata_type| {
+                    let maybe_metadata_term_id = {
+                        let mut current_term_id = None;
+                        for element_type in element_types {
+                            if current_term_id.is_some() {
+                                break;
+                            }
+                            current_term_id = self
+                                .term_index
+                                .get_id(&named_node_to_term(*element_type))
+                                .ok();
+                        }
+                        current_term_id
+                    };
+
+                    maybe_metadata_term_id.map_or((Some(base_term_id), None), |metadata_term_id| {
+                        let content = self
+                            .metadata
+                            .get_element_metadata_content(metadata_type, metadata_term_id);
+                        (Some(base_term_id), content)
+                    })
+                });
+            return Ok(maybe_element);
+        }
+        let msg = format!(
+            "Failed to create ontology {element_name}: Term id for document base '{}' not found in term index",
+            document_base.base_term
+        );
+        debug!("{msg}");
+        failed.push(SerializationErrorKind::TermIndexError(msg).into());
+
+        Ok((None, None))
+    }
+
+    fn extract_header_title(
+        &self,
+        document_base: &DocumentBase,
+        failed: &mut Vec<ErrorRecord>,
+    ) -> Result<Option<HashMap<String, Vec<String>>>, SerializationError> {
+        // Try getting title from title buffer first
+        let maybe_title = self.get_metadata_element(
+            document_base,
+            &[dcterms::TITLE, dc::TITLE],
+            "title",
+            failed,
+        )?;
+
+        match maybe_title {
+            (_, Some(titles)) => Ok(Some(titles)),
+            (Some(base_term_id), None) => {
+                // Try getting title from label buffer
+                match self.label_buffer.read()?.get(&base_term_id) {
+                    Some(Some(label)) => {
+                        let mut map = HashMap::new();
+                        map.insert(String::new(), vec![label.clone()]);
+                        Ok(Some(map))
+                    }
+                    Some(None) => {
+                        // No label declared
+                        let msg = "Ontology title not found in ontology.".to_string();
+                        debug!("{msg}");
+                        failed.push(SerializationErrorKind::SerializationWarning(msg).into());
+                        Ok(None)
+                    }
+                    None => {
+                        // No label found in buffer
+                        let msg = "Ontology title not found in label buffer".to_string();
+                        debug!("{msg}");
+                        failed.push(SerializationErrorKind::SerializationWarning(msg).into());
+                        Ok(None)
+                    }
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn extract_header_description(
+        &self,
+        document_base: &DocumentBase,
+        failed: &mut Vec<ErrorRecord>,
+    ) -> Result<Option<HashMap<String, Vec<String>>>, SerializationError> {
+        // Try getting description from description buffer first
+        let maybe_desc = self.get_metadata_element(
+            document_base,
+            &[dcterms::DESCRIPTION, dc::DESCRIPTION],
+            "description",
+            failed,
+        )?;
+
+        match maybe_desc {
+            (_, Some(descriptions)) => Ok(Some(descriptions)),
+            (_, None) => {
+                // Try getting description from comment buffer
+                self.get_metadata_element(document_base, &[rdfs::COMMENT], "comment", failed)
+                    .map(|(_, map)| map)
+            }
         }
     }
 }
@@ -290,7 +672,7 @@ impl Display for SerializationDataBuffer {
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone()
-                .unwrap_or_default()
+                .map_or_else(String::new, |docbase| docbase.base)
         )?;
         writeln!(f, "\tnode_element_buffer:")?;
         for (term_id, element) in self
@@ -305,7 +687,7 @@ impl Display for SerializationDataBuffer {
                 .map_or_else(|e| e.to_string(), |term| term.to_string());
             writeln!(f, "\t\t{term} : {element}")?;
         }
-        writeln!(f, "\tedge_element_buffer (not used by into()):")?;
+        writeln!(f, "\tedge_element_buffer:")?;
         for (term_id, element) in self
             .edge_element_buffer
             .read()
@@ -395,7 +777,7 @@ impl Display for SerializationDataBuffer {
                 .term_index
                 .display_edge(edge)
                 .unwrap_or_else(|e| e.to_string());
-            writeln!(f, "{display_edge}\n\t{characteristics:?}")?;
+            writeln!(f, "\t\t{display_edge}\n\t\t\t{characteristics:?}")?;
         }
 
         writeln!(f, "\tnode_characteristics:")?;
@@ -409,7 +791,7 @@ impl Display for SerializationDataBuffer {
                 .term_index
                 .get(*term_id)
                 .map_or_else(|e| e.to_string(), |term| term.to_string());
-            writeln!(f, "{term}\n\t{characteristics:?}")?;
+            writeln!(f, "\t\t{term}\n\t\t\t{characteristics:?}")?;
         }
 
         writeln!(f, "\tindividual_count_buffer:")?;
@@ -449,12 +831,13 @@ impl Display for SerializationDataBuffer {
                     .term_index
                     .display_triple(triple)
                     .unwrap_or_else(|e| e.to_string());
-                writeln!(f, "{display_triple}")?;
+                writeln!(f, "\t\t\t{display_triple}")?;
             }
         }
         // Not needed as it's displayed by the serializer
         // writeln!(f, "\tfailed_buffer:")?;
         // writeln!(f, "{}", ErrorRecord::format_records(&self.failed_buffer))?;
+        write!(f, "{}", self.metadata)?;
         writeln!(f, "}}")
     }
 }

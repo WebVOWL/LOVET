@@ -11,11 +11,15 @@ use grapher::prelude::{
     ElementType, OwlEdge, OwlNode, OwlType, RdfEdge, RdfType, RdfsNode, RdfsType,
 };
 use log::warn;
-use oxrdf::TermRef;
+
+use oxrdf::{NamedNodeRef, Term, TermRef};
 use vowlgrapher_util::prelude::ErrorRecord;
 
 use crate::{
-    datastructures::{ArcTerm, serialization_data_buffer::SerializationDataBuffer},
+    datastructures::{
+        ArcTerm, LanguageTag, MetadataContent, index::TermIndex,
+        serialization_data_buffer::SerializationDataBuffer,
+    },
     errors::{SerializationError, SerializationErrorKind},
     serializer_util::synthetic::{
         SYNTH_LITERAL, SYNTH_LITERAL_VALUE, SYNTH_LOCAL_LITERAL, SYNTH_LOCAL_THING, SYNTH_THING,
@@ -53,16 +57,6 @@ pub fn is_synthetic(term: &ArcTerm) -> bool {
         }
     }
     false
-}
-
-/// Returns true if the term belongs to the class of ontologies.
-pub fn is_ontology(term: &ArcTerm) -> bool {
-    match term.as_ref().as_ref() {
-        TermRef::NamedNode(named_node_ref) => {
-            matches!(named_node_ref, owl::ONTOLOGY)
-        }
-        _ => false,
-    }
 }
 
 /// Reserved IRIs should not be overridden by e.g. "external class" [`ElementType`].
@@ -256,8 +250,8 @@ pub fn is_external(
     }
 
     let clean_term = trim_tag_circumfix(&term.to_string());
-    if let Some(base) = &*data_buffer.document_base.read()? {
-        Ok(!(iri_matches_document_base(base.as_ref(), &clean_term)
+    if let Some(docbase) = &*data_buffer.document_base.read()? {
+        Ok(!(iri_matches_document_base(&docbase.base, &clean_term)
             || is_reserved(term)
             || is_synthetic(term)))
     } else {
@@ -273,4 +267,27 @@ pub fn is_external(
         }
         Ok(false)
     }
+}
+
+/// Translates the term ids of metadata content into term strings.
+pub fn translate_metadata_content(
+    term_index: &TermIndex,
+    content: &MetadataContent,
+) -> Vec<String> {
+    content
+        .iter()
+        .map(|content_term_id| term_index.display_term(*content_term_id))
+        .collect()
+}
+
+/// Converts a [`NamedNodeRef`] into a term.
+///
+/// This is useful for converting vocabulary constructs into terms for use in serialization.
+pub fn named_node_to_term(node: NamedNodeRef) -> ArcTerm {
+    <Term as Into<ArcTerm>>::into(node.into())
+}
+
+/// Formats a language tag, handling None in a standardized way.
+pub fn fmt_langtag(lang_tag: Option<LanguageTag>) -> String {
+    lang_tag.unwrap_or_else(|| "None".to_string())
 }
