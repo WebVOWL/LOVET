@@ -1,5 +1,7 @@
 use leptos::prelude::*;
-use std::{collections::VecDeque, panic::Location};
+use std::collections::VecDeque;
+#[cfg(debug_assertions)]
+use std::panic::Location;
 use vowlgrapher_util::prelude::{
     ErrorRecord, ErrorSeverity, ErrorType, VOWLGrapherError, get_timestamp,
 };
