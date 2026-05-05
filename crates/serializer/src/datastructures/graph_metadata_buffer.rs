@@ -1,5 +1,3 @@
-use vowlgrapher_util::prelude::ErrorRecord;
-
 use crate::{
     datastructures::{
         ArcTerm, ArcTriple, ElementTypeMetadata, LanguageTag, MetadataType, TermID,
@@ -78,14 +76,12 @@ impl GraphMetadataBuffer {
         metadata_type: &MetadataType,
         metadata_term_id: TermID,
         term_cache: &mut HashMap<ArcTerm, Arc<String>>,
-        failed: &mut Vec<ErrorRecord>,
     ) -> Result<Option<HashMap<String, Vec<String>>>, SerializationError> {
         if let Some(tagged_metadata) = metadata_type.get(&metadata_term_id) {
             let mut out = HashMap::new();
             for (lang_tag, content) in tagged_metadata {
                 let k = fmt_langtag(lang_tag.clone());
-                let v =
-                    fmt_translated_metadata_content(content, &self.term_index, term_cache, failed)?;
+                let v = fmt_translated_metadata_content(content, &self.term_index, term_cache)?;
                 out.insert(k, v);
             }
 

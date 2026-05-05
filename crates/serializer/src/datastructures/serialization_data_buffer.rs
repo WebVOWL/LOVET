@@ -504,7 +504,6 @@ impl SerializationDataBuffer {
                                     &metadata_term,
                                     DisplayCase::Title,
                                     term_cache,
-                                    failed,
                                 ))
                                 .or_default();
                             for (lang_tag, content) in tagged_metadata {
@@ -515,7 +514,6 @@ impl SerializationDataBuffer {
                                             &content,
                                             &self.term_index,
                                             term_cache,
-                                            failed,
                                         ) {
                                             Ok(content) => content,
                                             Err(e) => {
@@ -593,7 +591,6 @@ impl SerializationDataBuffer {
                             metadata_type,
                             metadata_term_id,
                             term_cache,
-                            failed,
                         ) {
                             Ok(content) => content,
                             Err(e) => {
