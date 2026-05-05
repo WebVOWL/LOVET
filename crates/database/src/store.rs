@@ -143,7 +143,7 @@ impl VOWLGrapherStore {
                 })?;
 
                 debug!(
-                    "Loaded {} quad in {} s",
+                    "Loaded {} quads in {} s",
                     temp_graph_name,
                     Instant::now()
                         .checked_duration_since(start_time)
@@ -151,11 +151,8 @@ impl VOWLGrapherStore {
                         .as_secs_f32()
                 );
 
-                let default_query_logic =
-                    vowlgrapher_sparql_queries::prelude::DEFAULT_QUERY.clone();
-
                 let (display_data, errors) =
-                    Box::pin(self.query(default_query_logic, Some(temp_graph_name))).await?;
+                    Box::pin(self.query(DEFAULT_QUERY.to_string(), Some(temp_graph_name))).await?;
 
                 Ok((display_data, errors))
             }
