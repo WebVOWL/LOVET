@@ -1,6 +1,6 @@
 use futures::stream::{BoxStream, StreamExt};
 use grapher::prelude::GraphDisplayData;
-use log::{debug, info, warn, trace};
+use log::{debug, info, trace, warn};
 use rdf_fusion::execution::results::QueryResults;
 use rdf_fusion::model::{NamedNodeRef, Quad};
 use rdf_fusion::store::Store;
@@ -16,6 +16,7 @@ use vowlgrapher_parser::parser_util::{
     path_type,
 };
 use vowlgrapher_serializer::prelude::GraphDisplayDataSolutionSerializer;
+use vowlgrapher_sparql_queries::prelude::DEFAULT_QUERY;
 use vowlgrapher_util::prelude::{DataType, ErrorRecord, VOWLGRAPHER_ENVIRONMENT, VOWLGrapherError};
 
 static GLOBAL_STORE: std::sync::OnceLock<Store> = std::sync::OnceLock::new();

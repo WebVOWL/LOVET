@@ -66,7 +66,7 @@ pub fn CustomSparql() -> impl IntoView {
                 </Show>
 
                 <div>
-                    <p>"Ensure your query binds results to the standard triple variables ?s (subject), ?p (predicate), and ?o (object) if used. 
+                    <p>"Ensure your query binds results to the standard triple variables ?s (subject), ?p (predicate), and ?o (object) if used.
                     Automatic prefix fetching is currently disabled. Use full IRIs for any namespace not listed below."
                     </p>
                     <p class="text-[10px] font-bold text-gray-500 uppercase mb-1">"Available Prefixes"</p>
