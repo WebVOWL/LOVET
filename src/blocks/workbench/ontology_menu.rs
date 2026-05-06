@@ -77,6 +77,7 @@ pub fn SelectStaticInput() -> impl IntoView {
         if name.is_empty() {
             return;
         }
+        error_context.clear();
         match name.try_into() {
             Ok(ontology) => {
                 selected_ontology.set(Some(ontology));
@@ -300,6 +301,7 @@ pub fn UploadInput() -> impl IntoView {
 
             if let Err(e) = tracker_file.upload_files(&files, move |form| {
                 info!("Uploading files");
+                error_context.clear();
                 upload.local_action.dispatch_local(form);
                 upload.mode.set("local".to_string());
             }) {
@@ -325,6 +327,7 @@ pub fn UploadInput() -> impl IntoView {
                         .upload_url(
                             &url,
                             move |u| {
+                                error_context.clear();
                                 upload.remote_action.dispatch(u);
                                 upload.mode.set("remote".to_string());
                             },
