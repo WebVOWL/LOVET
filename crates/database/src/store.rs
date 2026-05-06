@@ -1,6 +1,6 @@
 use futures::stream::{BoxStream, StreamExt};
 use grapher::prelude::GraphDisplayData;
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 use rdf_fusion::execution::results::QueryResults;
 use rdf_fusion::model::{NamedNodeRef, Quad};
 use rdf_fusion::store::Store;
@@ -20,6 +20,7 @@ use vowlgrapher_parser::parser_util::{
     path_type,
 };
 use vowlgrapher_serializer::prelude::GraphDisplayDataSolutionSerializer;
+use vowlgrapher_sparql_queries::prelude::DEFAULT_QUERY;
 use vowlgrapher_util::prelude::{DataType, ErrorRecord, VOWLGRAPHER_ENVIRONMENT, VOWLGrapherError};
 
 static GLOBAL_STORE: std::sync::OnceLock<Store> = std::sync::OnceLock::new();
@@ -120,10 +121,15 @@ impl VOWLGrapherStore {
         let user_query = graph_name.map_or_else(
             || query.replace("GRAPH <{GRAPH_IRI}>", ""),
             |name| {
-                let graph_name = self.get_graph_name(&name);
+                let graph_name = if name.starts_with("urn:vowlr") {
+                    name
+                } else {
+                    self.get_graph_name(&name)
+                };
                 query.replace("{GRAPH_IRI}", &graph_name)
             },
         );
+        trace!("{user_query}");
 
         let solution_serializer = GraphDisplayDataSolutionSerializer::new();
         let query_stream = self
@@ -145,12 +151,53 @@ impl VOWLGrapherStore {
                 "Query stream is not a SELECT query".to_string(),
             )
             .into()),
-            QueryResults::Graph(_query_triple_stream) => {
-                // TODO: Implement to support user-defined SPARQL queries
-                Err(VOWLGrapherStoreErrorKind::UnsupportedQueryType(
-                    "Query stream is not a SELECT query".to_string(),
+            QueryResults::Graph(mut query_triple_stream) => {
+                let temp_id = uuid::Uuid::new_v4().to_string();
+                let temp_graph_name = format!("urn:vowlr:temp:{temp_id}");
+                debug!("Creating temporary view graph: {temp_graph_name}");
+
+                let mut buffer = Vec::new();
+
+                while let Some(maybe_triple) = query_triple_stream.next().await {
+                    let t = maybe_triple.map_err(|e| {
+                        <VOWLGrapherStoreError as Into<VOWLGrapherError>>::into(
+                            VOWLGrapherStoreError::from(e),
+                        )
+                    })?;
+                    let line = format!("{} {} {} .\n", t.subject, t.predicate, t.object);
+                    buffer.extend_from_slice(line.as_bytes());
+                }
+
+                let start_time = Instant::now();
+                let cursor = std::io::Cursor::new(buffer);
+
+                let prepared = vowlgrapher_parser::parser_util::parser_from_reader(
+                    cursor,
+                    DataType::NTriples,
+                    false,
+                    &temp_graph_name,
                 )
-                .into())
+                .map_err(<VOWLGrapherStoreError as Into<VOWLGrapherError>>::into)?;
+
+                self.session.extend(prepared).await.map_err(|e| {
+                    <VOWLGrapherStoreError as Into<VOWLGrapherError>>::into(
+                        VOWLGrapherStoreError::from(e),
+                    )
+                })?;
+
+                debug!(
+                    "Loaded {} quads in {} s",
+                    temp_graph_name,
+                    Instant::now()
+                        .checked_duration_since(start_time)
+                        .unwrap_or(Duration::new(0, 0))
+                        .as_secs_f32()
+                );
+
+                let (display_data, errors) =
+                    Box::pin(self.query(DEFAULT_QUERY.to_string(), Some(temp_graph_name))).await?;
+
+                Ok((display_data, errors))
             }
         }
     }
